@@ -1,0 +1,36 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["metric_id", "sql_blocks"],
+    "properties": {
+      "metric_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "metric_name": {
+        "type": "string"
+      },
+      "business_question": {
+        "type": "string"
+      },
+      "definition": {
+        "type": "string"
+      },
+      "tables": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "expected_measures": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "sql_blocks": {
+        "type": "array",
+        "items": { "type": "integer" },
+        "minItems": 1
+      }
+    },
+    "additionalProperties": false
+  }
+}

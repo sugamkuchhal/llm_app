@@ -1,0 +1,1031 @@
+[{
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Animal Planet HD(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Animal Planet(v)"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "BBC News"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "CNN News18"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Discovery Channel(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Discovery HD(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Discovery Science(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Discovery Turbo"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "History TV 18 HD(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "History TV 18(v)"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "India Today Television"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Mirror Now"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "NDTV 24x7"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Nat Geo Wild HD(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Nat Geo Wild(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "National Geographic HD(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "National Geographic(v)"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "News 9"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "News X(na)"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Republic TV"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Sony BBC Earth HD(v)"
+}, {
+  "genre": "Factual Entertainment",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Sony BBC Earth(v)"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Times Now"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "Times Now World"
+}, {
+  "genre": "English News",
+  "region": "India",
+  "target": "NCCS AB 15+",
+  "channel": "WION(v)"
+}, {
+  "genre": "EBN",
+  "region": "10L+",
+  "target": "NCCS AB Male 22+",
+  "channel": "BTVI(na)"
+}, {
+  "genre": "HBN v1",
+  "region": "HSM",
+  "target": "NCCS AB Male 22+",
+  "channel": "CNBC Awaaz"
+}, {
+  "genre": "EBN",
+  "region": "10L+",
+  "target": "NCCS AB Male 22+",
+  "channel": "CNBC Bazar"
+}, {
+  "genre": "HBN v1",
+  "region": "HSM",
+  "target": "NCCS AB Male 22+",
+  "channel": "CNBC Bazar"
+}, {
+  "genre": "EBN",
+  "region": "10L+",
+  "target": "NCCS AB Male 22+",
+  "channel": "CNBC TV 18"
+}, {
+  "genre": "EBN",
+  "region": "10L+",
+  "target": "NCCS AB Male 22+",
+  "channel": "CNBC TV 18 Prime HD"
+}, {
+  "genre": "EBN",
+  "region": "10L+",
+  "target": "NCCS AB Male 22+",
+  "channel": "ET Now"
+}, {
+  "genre": "EBN",
+  "region": "10L+",
+  "target": "NCCS AB Male 22+",
+  "channel": "NDTV Profit"
+}, {
+  "genre": "HBN v1",
+  "region": "HSM",
+  "target": "NCCS AB Male 22+",
+  "channel": "Zee Business"
+}, {
+  "genre": "Rajasthan",
+  "region": "Rajasthan",
+  "target": "NCCS All 15+",
+  "channel": "1st India News"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "ABP Ananda"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "ABP Asmita"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "ABP Ganga(na)"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "ABP Majha"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "ABP News"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "ANM News(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "APN(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Aaj Tak"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Aaj Tak HD"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "Argus"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Asianet News"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Asianet Suvarna News"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "Assam Talks(na)"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "B News(na)"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "Bangla Time(na)"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "Bansal News"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Bharat 24 Vision Of New India(na)"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "Bharat Samachar"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "Calcutta News"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Captain News(na)"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Cauvery News(na)"
+}, {
+  "genre": "Har/HP/J\u0026K",
+  "region": "Har/HP/J\u0026K",
+  "target": "NCCS All 15+",
+  "channel": "DD Kashir"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "DD News"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "DY 365"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "Daily Post"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "Free TV India News Gujarat(na)"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "GSTV(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Good News Today"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "Gujarat First"
+}, {
+  "genre": "Har/HP/J\u0026K",
+  "region": "Har/HP/J\u0026K",
+  "target": "NCCS All 15+",
+  "channel": "Gulistan News"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "IBC 24"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "IND 24(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "India Daily Live(na)"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "India News Haryana(na)"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "India News Madhya Pradesh/Chattisgarh(na)"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "India News Punjab-Himachal-Jammu Kashmir(na)"
+}, {
+  "genre": "Rajasthan",
+  "region": "Rajasthan",
+  "target": "NCCS All 15+",
+  "channel": "India News Rajasthan(na)"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "India News Uttar Pradesh/Uttrakhand(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "India News(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "India TV"
+}, {
+  "genre": "Har/HP/J\u0026K",
+  "region": "Har/HP/J\u0026K",
+  "target": "NCCS All 15+",
+  "channel": "JKL 24x7 News"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "Jai Maharashtra"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Janam TV"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Janasri News(na)"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "K News India(na)"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Kairali News"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "Kalinga TV"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "Kanak News"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Kasthuri Newz 24(na)"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Kaumudy TV(na)"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "Kolkata TV"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "Living India News"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "Lokshahi Marathi"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Lotus News(na)"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "MH One News"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Malai Murasu Seithikal"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Mangalam TV(na)"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Manorama News"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "Mantavya 24x7 News(na)"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Mathrubhumi News"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Media One TV"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "ND24- Newsdaily24.in"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "NDTV India"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "NDTV Madhya Pradesh-Chhattisgarh"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "NDTV Marathi"
+}, {
+  "genre": "Rajasthan",
+  "region": "Rajasthan",
+  "target": "NCCS All 15+",
+  "channel": "NDTV Rajasthan"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "NE News(na)"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "NKTV Plus"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "Nandighosha TV"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "Naxatra News(na)"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "News 1st Kannada"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "News 1st(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "News 24"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "News 24 Madhyapradesh-Chattisgarh"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "News 7 Tamil"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "News Express(na)"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "News J(na)"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "News Live"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "News Nation"
+}, {
+  "genre": "Bihar/Jharkhand",
+  "region": "Bihar/Jharkhand",
+  "target": "NCCS All 15+",
+  "channel": "News State Bihar-Jharkhand"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "News State Madhya Pradesh/Chhattisgarh"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "News State Punjab-Haryana-Himachal"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "News State UP/Uttarakhand"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "News Tamil 24x7"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "News Time Assam(na)"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "News Time Bangla"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "News18 Assam"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "News18 Bangla"
+}, {
+  "genre": "Bihar/Jharkhand",
+  "region": "Bihar/Jharkhand",
+  "target": "NCCS All 15+",
+  "channel": "News18 Bihar Jharkhand"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "News18 Gujarati"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "News18 India"
+}, {
+  "genre": "Har/HP/J\u0026K",
+  "region": "Har/HP/J\u0026K",
+  "target": "NCCS All 15+",
+  "channel": "News18 Jammu Kashmir Ladakh Himachal Haryana"
+}, {
+  "genre": "Har/HP/J\u0026K",
+  "region": "Har/HP/J\u0026K",
+  "target": "NCCS All 15+",
+  "channel": "News18 Jammu/Kashmir/Ladakh/Himachal"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "News18 Kannada"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "News18 Kerala"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "News18 Lokmat"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "News18 Madhya Pradesh Chattisgarh"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "News18 Odia"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "News18 Punjab"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "News18 Punjab/Haryana"
+}, {
+  "genre": "Rajasthan",
+  "region": "Rajasthan",
+  "target": "NCCS All 15+",
+  "channel": "News18 Rajasthan"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "News18 Tamil Nadu"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "News18 Uttar Pradesh Uttarakhand"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "News7"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "NewsX Kannada(na)"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "OTV"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "PTC News"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Polimer News"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Power TV"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "Prag News"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Praja TV(na)"
+}, {
+  "genre": "Assam/North East/ Sikkim",
+  "region": "Assam / North East / Sikkim",
+  "target": "NCCS All 15+",
+  "channel": "Protidin Time"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Public TV"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "Pudhari News"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Puthiya Thalaimurai"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "R Plus"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "R. Bangla"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "R. Kannada"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Raj News 24x7"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Raj News Kannada"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Raj News Malayalam(na)"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Reporter"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Republic Bharat"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "Saam TV"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "Sadhna News MP/CG(na)"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "Sadhna News(na)"
+}, {
+  "genre": "Bihar/Jharkhand",
+  "region": "Bihar/Jharkhand",
+  "target": "NCCS All 15+",
+  "channel": "Sahara Samay Bihar \u0026 Jharkhand(na)"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "Sahara Samay MP/Chattisgarh(na)"
+}, {
+  "genre": "Rajasthan",
+  "region": "Rajasthan",
+  "target": "NCCS All 15+",
+  "channel": "Sahara Samay NCR/Haryana/Rajasthan/Punjab(na)"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "Sahara Samay UP Uttarakhand(na)"
+}, {
+  "genre": "Rajasthan",
+  "region": "Rajasthan",
+  "target": "NCCS All 15+",
+  "channel": "Samachar Plus Rajasthan(na)"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Samay(na)"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Samaya News(na)"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "Sandesh News"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Sathiyam TV"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Seithigal"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Suddi TV(na)"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Sun News"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "Swadesh News"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "Swaraj Express SMBC"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "TV 100"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "TV 5 Kannada"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "TV1 News 24x7(na)"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "TV9 Bangla"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "TV9 Bharatvarsh"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "TV9 Gujarati"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "TV9 Kannada"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "TV9 Marathi"
+}, {
+  "genre": "TN/ Pondichery",
+  "region": "TN/Pondicherry",
+  "target": "NCCS All 15+",
+  "channel": "Thanthi TV"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Times Now Navbharat"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "Total Haryana(na)"
+}, {
+  "genre": "Har/HP/J\u0026K",
+  "region": "Har/HP/J\u0026K",
+  "target": "NCCS All 15+",
+  "channel": "Total TV"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "Total TV"
+}, {
+  "genre": "Kerala",
+  "region": "Kerala",
+  "target": "NCCS All 15+",
+  "channel": "Twenty Four"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Udaya News(na)"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "VTV News"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "Vistaar News"
+}, {
+  "genre": "Karnataka",
+  "region": "Karnataka",
+  "target": "NCCS All 15+",
+  "channel": "Vistara News(na)"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "WPN World Punjabi"
+}, {
+  "genre": "West Bengal",
+  "region": "West Bengal",
+  "target": "NCCS All 15+",
+  "channel": "Zee 24 Ghanta"
+}, {
+  "genre": "GUJ/D\u0026D/DNH",
+  "region": "Guj / D\u0026D / DNH",
+  "target": "NCCS All 15+",
+  "channel": "Zee 24 Kalak"
+}, {
+  "genre": "Maharashtra",
+  "region": "Mah / Goa",
+  "target": "NCCS All 15+",
+  "channel": "Zee 24 Taas"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Zee Bharat"
+}, {
+  "genre": "Bihar/Jharkhand",
+  "region": "Bihar/Jharkhand",
+  "target": "NCCS All 15+",
+  "channel": "Zee Bihar Jharkhand"
+}, {
+  "genre": "Har/HP/J\u0026K",
+  "region": "Har/HP/J\u0026K",
+  "target": "NCCS All 15+",
+  "channel": "Zee Delhi NCR Haryana"
+}, {
+  "genre": "MP/CG",
+  "region": "MP/Chhattisgarh",
+  "target": "NCCS All 15+",
+  "channel": "Zee Madhya Pradesh Chhattisgarh"
+}, {
+  "genre": "HSM",
+  "region": "HSM",
+  "target": "NCCS All 15+",
+  "channel": "Zee News"
+}, {
+  "genre": "Odisha",
+  "region": "Odisha",
+  "target": "NCCS All 15+",
+  "channel": "Zee Odisha(na)"
+}, {
+  "genre": "Pun/Cha",
+  "region": "Pun/Cha",
+  "target": "NCCS All 15+",
+  "channel": "Zee Punjab Haryana Himachal"
+}, {
+  "genre": "Rajasthan",
+  "region": "Rajasthan",
+  "target": "NCCS All 15+",
+  "channel": "Zee Rajasthan"
+}, {
+  "genre": "UP/ UTK",
+  "region": "UP/Uttarakhand",
+  "target": "NCCS All 15+",
+  "channel": "Zee Uttar Pradesh Uttarakhand"
+}]

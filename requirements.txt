@@ -1,0 +1,4 @@
+flask
+google-cloud-aiplatform
+google-cloud-bigquery
+jsonschema

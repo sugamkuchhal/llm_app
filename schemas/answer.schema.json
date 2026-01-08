@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "required": ["headline", "takeaways", "metrics"],
+  "properties": {
+    "headline": {
+      "type": "string",
+      "minLength": 1
+    },
+    "takeaways": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 5
+    },
+    "details": {
+      "type": ["string", "null"]
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["metric_id", "results"],
+        "properties": {
+          "metric_id": { "type": "string" },
+          "metric_name": { "type": "string" },
+          "definition": { "type": "string" },
+          "results": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["rows"],
+              "properties": {
+                "sql": { "type": "string" },
+                "rows": {
+                  "type": "array",
+                  "items": { "type": "object" }
+                },
+                "schema": {}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

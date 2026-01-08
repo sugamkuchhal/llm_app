@@ -1,0 +1,19 @@
+{
+  "headline": "string",
+  "takeaways": ["string"],
+  "details": "string",
+  "metrics": [
+    {
+      "metric_id": "string",
+      "metric_name": "string",
+      "definition": "string",
+      "results": [
+        {
+          "sql": "string",
+          "rows": [],
+          "schema": []
+        }
+      ]
+    }
+  ]
+}

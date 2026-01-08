@@ -1,0 +1,470 @@
+{
+  "_meta": {
+    "name": "BARC Semantic Metadata",
+    "version": "1.0.0",
+    "status": "draft",
+    "owner": "Data CoE",
+    "created_on": "2025-12-29",
+    "scope": "analytics"
+  },
+  "global": {
+    "entities": {
+      "channel": {
+        "canonical_name": "Channel",
+        "description": "Represents a television channel as defined by BARC. This is the primary business entity across all datasets.",
+        "columns": ["Channel"],
+        "tables": ["channel_table", "time_band_table", "program_table"],
+        "join_compatibility": "exact_match"
+      },
+      "region": {
+        "canonical_name": "Region",
+        "description": "BARC-defined geographic market or region.",
+        "columns": ["Region"],
+        "tables": ["channel_table", "time_band_table", "program_table"],
+        "join_compatibility": "exact_match"
+      },
+      "target": {
+        "canonical_name": "Target",
+        "description": "Audience demographic classification used for all KPI computation.",
+        "columns": ["Target"],
+        "tables": ["channel_table", "time_band_table", "program_table"],
+        "join_compatibility": "exact_match"
+      },
+      "genre": {
+        "canonical_name": "genre",
+        "description": "Content category or genre classification for channels.",
+        "columns": ["genre"],
+        "tables": ["channel_table", "time_band_table", "program_table"],
+        "join_compatibility": "exact_match"
+      },
+      "is_network18": {
+        "canonical_name": "is_network18",
+        "description": "Tells if a Channel belogs to Network18",
+        "columns": ["is_network18"],
+        "tables": ["channel_table", "time_band_table", "program_table"],
+        "join_compatibility": "exact_match"
+      },
+      "program": {
+        "canonical_name": "Program",
+        "description": "Represents a single television program or show airing on a channel.",
+        "columns": ["program_name"],
+        "tables": ["program_table"],
+        "join_compatibility": "scoped_only"
+      }
+    },
+    "time_hierarchy": {
+      "levels": {
+        "year": {
+          "columns": ["year"],
+          "description": "Calendar year used for weekly and program-level aggregation."
+        },
+        "week": {
+          "columns": ["week", "week_id"],
+          "description": "BARC reporting week; primary alignment key across datasets."
+        },
+        "date": {
+          "columns": ["program_date", "time_band_date"],
+          "description": "Calendar date of program airing or time-band measurement."
+        },
+        "half_hour": {
+          "columns": ["time_band_half_hour"],
+          "description": "Standardized 30-minute viewing window."
+        },
+        "program_airing": {
+          "columns": ["program_start_datetime", "program_end_datetime"],
+          "description": "Exact timestamp window of an individual program airing."
+        }
+      },
+      "ordering": [
+        "year",
+        "week",
+        "date",
+        "half_hour",
+        "program_airing"
+      ],
+      "alignment_notes": [
+        "week_id is the primary cross-table temporal alignment key.",
+        "half_hour and program_airing are non-rollup-compatible without explicit safeguards.",
+        "date acts as a bridge between weekly and intraday grains."
+      ]
+    }
+  },
+  "channel_table": {
+    "tableName": "channel_table",
+    "uri": "bq://662487667928.dataset.channel_table",
+    "grain": {
+      "entity": ["Channel"],
+      "dimensions": ["genre", "Genre_identifier", "Region", "Target", "is_network18"],
+      "time": {
+        "level": "week",
+        "keys": ["year", "week", "week_id"]
+      },
+      "description": "One row represents weekly aggregated metrics for a single Channel × Region × Target × Genre combination. Used for competitive analysis, benchmarking, and universe-adjusted comparisons."
+    },
+    "timeRules": {
+      "primary_time_key": "week_id",
+      "allowed_groupings": ["year", "week", "week_id"],
+      "allowed_filters": ["year", "week", "week_id"],
+      "disallowed_groupings": [],
+      "notes": ""
+    },
+    "joins": [
+      {
+        "to": "time_band_table",
+        "join_type": "left",
+        "keys": ["Channel", "genre", "Region", "Target", "week_id"],
+        "resulting_grain": "half_hour",
+        "fanout_safe": false,
+        "notes": "Weekly channel rows expand to multiple half-hour rows; channel KPIs must not be aggregated after join."
+      },
+      {
+        "to": "program_table",
+        "join_type": "left",
+        "keys": ["Channel", "genre", "Region", "Target", "week_id"],
+        "resulting_grain": "program_airing",
+        "fanout_safe": false,
+        "notes": "Weekly channel rows expand to multiple program airings; channel KPIs must not be aggregated after join."
+      }
+    ],
+    "guardrails": {
+      "do_not_aggregate": [
+        "Do not aggregate channel KPIs after joining with time_band_table.",
+        "Do not aggregate channel KPIs after joining with program_table."
+      ],
+      "do_not_compare": [
+        "Do not compare channel KPIs with program-level KPIs.",
+        "Do not compare weekly channel KPIs with half-hour KPIs."
+      ],
+      "do_not_join": [],
+      "usage_notes": [
+        "Use channel_table for weekly channel-level performance and rankings.",
+        "Safe for trend analysis only within weekly grain."
+      ]
+    },
+    "columns": {
+      "genre": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Genre_identifier": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Region": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Target": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Channel": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "is_network18": { "dataType": "BOOLEAN", "nullable": true, "role": "dimension" },
+      "channel_AMA_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "SUM",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "additive_over_entities": ["Channel"],
+          "notes": "Sum of average-minute audiences across Channels only at the same grain; must not be aggregated across time or other dimensions."
+        },
+        "semanticTags": [ "viewership_kpi", "ama_metric", "thousands_unit", "sum_based" ],
+        "business_description": "Average Minute Audience (in '000s), the primary TV viewership currency in India, aligned with global standards.",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "Channel AMA is not directly comparable to AMA at other grains." }
+      },
+      "channel_all_Week_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; Can be summed over Channel, must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target combination. This takes all channels of the combination",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "channel_Week_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target * channel combination. This takes only the required channel in the consideration of the combination",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "channel_all_Avg_Daily_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target combination. This takes all channels in the combination. Also this is an average daily level data for the week in consideration",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "channel_Avg_Daily_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target * channel combination. This takes only the required channel in the consideration of the combination. Also this is an average daily level data for the week in consideration",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "channel_TSV": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "engagement_kpi", "tsv_metric", "time_normalized", "average_based" ],
+        "business_description": "Time Spent Viewing (TSV) is an engagement metric. Average time viewers spent watching during the timeband. TSV = (AMA / Cume Reach) × 30.",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "year": { "dataType": "INTEGER", "nullable": true, "role": "time" },
+      "week": { "dataType": "STRING", "nullable": true, "role": "time" },
+      "week_id": { "dataType": "INTEGER", "nullable": true, "role": "time" }
+    }
+  },
+  "time_band_table": {
+    "tableName": "time_band_table",
+    "uri": "bq://662487667928.dataset.time_band_table",
+    "grain": {
+      "entity": ["Channel"],
+      "dimensions": ["genre", "Region", "Target", "is_network18"],
+      "time": {
+        "level": "half_hour",
+        "keys": ["year", "week", "week_id", "time_band_date", "time_band_half_hour"]
+      },
+      "description": "One row represents metrics for a Channel × Region × Target × Genre combination within a fixed half-hour time band on a specific date. Used for understanding audience flow, daypart performance and channel strength."
+    },
+    "timeRules": {
+      "primary_time_key": "time_band_half_hour",
+      "allowed_groupings": ["time_band_half_hour", "time_band_date", "year", "week", "week_id"],
+      "allowed_filters": ["time_band_half_hour", "time_band_date", "year", "week", "week_id"],
+      "disallowed_groupings": [],
+      "notes": ""
+    },
+    "joins": [
+      {
+        "to": "channel_table",
+        "join_type": "left",
+        "keys": ["Channel", "genre", "Region", "Target", "week_id"],
+        "resulting_grain": "half_hour",
+        "fanout_safe": true,
+        "notes": "Each half-hour row maps to a single weekly channel row; no row multiplication."
+      },
+      {
+        "to": "program_table",
+        "join_type": "left",
+        "keys": ["Channel", "genre", "Region", "Target", "week_id", "time_band_half_hour", { "from": "time_band_date", "to": "program_date" }],
+        "resulting_grain": "program_airing",
+        "fanout_safe": false,
+        "notes": "Half-hour rows may expand to multiple program airings; post-join aggregation is unsafe."
+      }
+    ],
+    "guardrails": {
+      "do_not_aggregate": [
+        "Do not aggregate time-band KPIs after joining with program_table."
+      ],
+      "do_not_compare": [
+        "Do not compare half-hour KPIs directly with weekly channel KPIs."
+      ],
+      "do_not_join": [],
+      "usage_notes": [
+        "Use time_band_table for intraday and daypart analysis.",
+        "Time-band KPIs are safe only at half-hour grain."
+      ]
+    },
+    "columns": {
+      "genre": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Region": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Target": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Channel": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "is_network18": { "dataType": "BOOLEAN", "nullable": true, "role": "dimension" },
+      "time_band_AMA_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "SUM",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "additive_over_entities": ["Channel"],
+          "notes": "Sum of average-minute audiences across Channels only at the same grain; must not be aggregated across time or other dimensions."
+        },
+        "semanticTags": [ "viewership_kpi", "ama_metric", "thousands_unit", "sum_based" ],
+        "business_description": "Average Minute Audience (in '000s), the primary TV viewership currency in India, aligned with global standards.",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "Time-band AMA is specific to half-hour grain." }
+      },
+      "time_band_all_Week_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target combination. This takes all channels of the combination",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "time_band_Week_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target * channel combination. This takes only the required channel in the consideration of the combination",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "time_band_TSV": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "engagement_kpi", "tsv_metric", "time_normalized", "average_based" ],
+        "business_description": "Time Spent Viewing (TSV) is an engagement metric. Average time viewers spent watching during the timeband. TSV = (AMA / Cume Reach) × 30.",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "time_band_date": { "dataType": "DATE", "nullable": true, "role": "time" },
+      "time_band_half_hour": { "dataType": "STRING", "nullable": true, "role": "time" },
+      "year": { "dataType": "INTEGER", "nullable": true, "role": "time" },
+      "week": { "dataType": "STRING", "nullable": true, "role": "time" },
+      "week_id": { "dataType": "INTEGER", "nullable": true, "role": "time" }
+    }
+  },
+  "program_table": {
+    "tableName": "program_table",
+    "uri": "bq://662487667928.dataset.program_table",
+    "grain": {
+      "entity": ["Program"],
+      "dimensions": ["genre", "Region", "Target", "Channel", "is_network18", "program_name"],
+      "time": {
+        "level": "program_airing",
+        "keys": ["year", "week", "week_id", "program_date", "time_band_half_hour", "program_start_datetime"]
+      },
+      "description": "One row represents metrics for a single program airing on a channel on a specific date. Used for Program-level viewership analysis. It breaks down TV audiences by program, time slot, and region for detailed performance attribution and competitive program analysis."
+    },
+    "timeRules": {
+      "primary_time_key": "program_start_datetime",
+      "allowed_groupings": ["program_date", "time_band_half_hour", "year", "week", "week_id"],
+      "allowed_filters": ["program_date", "time_band_half_hour", "year", "week", "week_id"],
+      "disallowed_groupings": [],
+      "notes": ""
+    },
+    "joins": [
+      {
+        "to": "channel_table",
+        "join_type": "left",
+        "keys": ["Channel", "genre", "Region", "Target", "week_id"],
+        "resulting_grain": "program_airing",
+        "fanout_safe": true,
+        "notes": "Multiple program airings map to a single channel-week row; no row multiplication."
+      },
+      {
+        "to": "time_band_table",
+        "join_type": "left",
+        "keys": ["Channel", "genre", "Region", "Target", "week_id", "time_band_half_hour", { "from": "program_date", "to": "time_band_date" }],
+        "resulting_grain": "program_airing",
+        "fanout_safe": true,
+        "notes": "Multiple program airings map to a single time band-half hour row; no row multiplication."
+      }
+    ],
+    "guardrails": {
+      "do_not_aggregate": [
+        "Do not aggregate program KPIs to channel or weekly level."
+      ],
+      "do_not_compare": [
+        "Do not compare program KPIs with channel or time-band KPIs."
+      ],
+      "do_not_join": [],
+      "usage_notes": [
+        "Use program_table for program airing analysis only.",
+        "Program KPIs are scoped to individual airings."
+      ]
+    },
+    "columns": {
+      "genre": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Region": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Target": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "Channel": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "is_network18": { "dataType": "BOOLEAN", "nullable": true, "role": "dimension" },
+      "program_name": { "dataType": "STRING", "nullable": true, "role": "dimension" },
+      "program_AMA_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "SUM",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "additive_over_entities": ["Channel"],
+          "notes": "Sum of average-minute audiences across Channels only at the same grain; must not be aggregated across time or other dimensions."
+        },
+        "semanticTags": [ "viewership_kpi", "ama_metric", "thousands_unit", "sum_based" ],
+        "business_description": "Average Minute Audience (in '000s), the primary TV viewership currency in India, aligned with global standards.",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "Program AMA is scoped to individual airings and not cross-table comparable." }
+      },
+      "program_all_Week_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target combination. This takes all channels of the combination",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "program_Week_Reach_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "viewership_kpi", "reach_metric", "thousands_unit", "average_based" ],
+        "business_description": "Cume Reach (in '000s), for the particular genre * region * target * channel combination. This takes only the required channel in the consideration of the combination",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "program_Normalized_TVT_000": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "derived",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Normalized metric scoped to individual program airings; must not be aggregated."
+        },
+        "semanticTags": [ "viewership_kpi", "ama_metric", "time_normalized", "non_additive" ],
+        "business_description": "Normalized Average Minute Audience (in '000s), This is to achieve parity for different programs of varying durations. AMA is normalized to 30 minutes",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "program_TSV": { "dataType": "FLOAT", "nullable": true, "role": "kpi" ,
+        "kpi": {
+          "type": "base",
+          "aggregation": "AVG",
+          "additive_over_time": false,
+          "additive_over_dimensions": false,
+          "notes": "Average-based metric; must not be summed across time or segments."
+        },
+        "semanticTags": [ "engagement_kpi", "tsv_metric", "time_normalized", "average_based" ],
+        "business_description": "Time Spent Viewing (TSV) is an engagement metric. Average time viewers spent watching during the timeband. TSV = (AMA / Cume Reach) × 30.",
+        "comparability": { "comparable_with": [], "conditions": [], "notes": "" }
+      },
+      "program_date": { "dataType": "DATE", "nullable": true, "role": "time" },
+      "program_start_datetime": { "dataType": "DATETIME", "nullable": true, "role": "time" },
+      "program_end_datetime": { "dataType": "DATETIME", "nullable": true, "role": "time" },
+      "Duration_Minutes": { "dataType": "FLOAT", "nullable": true, "role": "dimension" },
+      "time_band_full_hour": { "dataType": "STRING", "nullable": true, "role": "time" },
+      "time_band_half_hour": { "dataType": "STRING", "nullable": true, "role": "time" },
+      "year": { "dataType": "INTEGER", "nullable": true, "role": "time" },
+      "week": { "dataType": "STRING", "nullable": true, "role": "time" },
+      "week_id": { "dataType": "INTEGER", "nullable": true, "role": "time" }
+    }
+  }
+}
