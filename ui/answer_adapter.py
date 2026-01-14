@@ -40,19 +40,96 @@ def resolve_time_column(columns, time_hierarchy):
 # -----------------------------
 
 def resolve_roles(columns, domain_meta):
-    dimensions = []
-    kpis = []
+    """
+    Resolve roles using domain metadata.
 
-    tables = domain_meta.get("tables", {})
+    Supports domain meta shaped like `barc_meta.json` where tables are top-level
+    keys (e.g. channel_table/time_band_table/program_table) as well as any
+    legacy shape with `tables: {...}`.
+    """
+    dimensions: list[str] = []
+    kpis: list[str] = []
 
-    for table in tables.values():
-        for col, meta in table.get("columns", {}).items():
-            if col not in columns:
+    def _add_unique(dst: list[str], name: str):
+        if name not in dst:
+            dst.append(name)
+
+    # Prefer legacy `tables` if present, otherwise scan top-level tables.
+    tables_obj = domain_meta.get("tables")
+    if isinstance(tables_obj, dict):
+        tables = list(tables_obj.values())
+    else:
+        tables = [
+            v for k, v in domain_meta.items()
+            if k not in ("_meta", "global") and isinstance(v, dict)
+        ]
+
+    for table in tables:
+        cols = table.get("columns", {})
+        if not isinstance(cols, dict):
+            continue
+        for col, meta in cols.items():
+            if col not in columns or not isinstance(meta, dict):
                 continue
             if meta.get("role") == "dimension":
-                dimensions.append(col)
+                _add_unique(dimensions, col)
             elif meta.get("role") == "kpi":
-                kpis.append(col)
+                _add_unique(kpis, col)
+
+    return dimensions, kpis
+
+
+def resolve_time_from_field_info(field_info, time_hierarchy):
+    """
+    Returns (time_level, column_name) or (None, None), preferring field_info.
+    """
+    if not field_info:
+        return None, None
+
+    ordering = time_hierarchy.get("ordering", [])
+    rank = {level: i for i, level in enumerate(ordering)}
+
+    best = None  # (rank, time_level, name)
+    for f in field_info:
+        if not isinstance(f, dict):
+            continue
+        name = f.get("name")
+        time_level = f.get("time_level")
+        role = f.get("role")
+        if not name or not time_level:
+            continue
+        if role not in ("dimension", "unknown"):
+            continue
+        r = rank.get(time_level, -1)
+        if best is None or r > best[0]:
+            best = (r, time_level, name)
+
+    if not best:
+        return None, None
+    return best[1], best[2]
+
+
+def resolve_roles_from_field_info(field_info):
+    """
+    Returns (dimensions, kpis) using field_info order.
+    """
+    if not field_info:
+        return [], []
+
+    dimensions: list[str] = []
+    kpis: list[str] = []
+
+    for f in field_info:
+        if not isinstance(f, dict):
+            continue
+        name = f.get("name")
+        role = f.get("role")
+        if not name or role not in ("dimension", "kpi"):
+            continue
+        if role == "dimension" and name not in dimensions:
+            dimensions.append(name)
+        if role == "kpi" and name not in kpis:
+            kpis.append(name)
 
     return dimensions, kpis
 
@@ -133,25 +210,32 @@ def vega_bar(rows, x, y, color=None):
 # Core chart builder
 # -----------------------------
 
-def build_charts(rows, domain_meta, expected_measures):
+def build_charts(rows, domain_meta, expected_measures, field_info=None):
     if not rows:
         return [vega_text("No data returned")]
 
-    columns = set(rows[0].keys())
+    # Preserve deterministic ordering when available.
+    if field_info:
+        field_names = [f.get("name") for f in field_info if isinstance(f, dict) and f.get("name")]
+        columns = set(field_names) if field_names else set(rows[0].keys())
+    else:
+        columns = set(rows[0].keys())
 
     # time
-    time_level, time_col = resolve_time_column(
-        columns,
-        domain_meta["global"]["time_hierarchy"]
-    )
+    time_hierarchy = domain_meta["global"]["time_hierarchy"]
+    time_level, time_col = resolve_time_from_field_info(field_info, time_hierarchy)
+    if not time_col:
+        time_level, time_col = resolve_time_column(columns, time_hierarchy)
 
     # roles
-    dimensions, kpis = resolve_roles(columns, domain_meta)
+    dimensions, kpis = resolve_roles_from_field_info(field_info)
+    if not dimensions and not kpis:
+        dimensions, kpis = resolve_roles(columns, domain_meta)
 
     non_time_dims = [d for d in dimensions if d != time_col]
 
     if not kpis and expected_measures:
-        for col in columns:
+        for col in (field_names if field_info and 'field_names' in locals() else sorted(columns)):
             if col in expected_measures:
                 # keep it simple: trust planner intent; rows already numeric for KPIs
                 kpis.append(col)
@@ -214,7 +298,8 @@ def build_ui_answer(core_answer, metric_payload, domain_meta):
             visuals = build_charts(
                 r["rows"],
                 domain_meta,
-                metric.get("expected_measures", [])
+                metric.get("expected_measures", []),
+                r.get("field_info"),
             )
 
 
@@ -222,6 +307,7 @@ def build_ui_answer(core_answer, metric_payload, domain_meta):
                 "sql": r["sql"],
                 "rows": r["rows"],
                 "schema": r.get("schema", []),
+                "field_info": r.get("field_info", []),
                 "visuals": visuals
             })
 
