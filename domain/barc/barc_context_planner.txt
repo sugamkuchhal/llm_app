@@ -31,9 +31,9 @@ INSTRUCTIONS 01.05 = Do NOT perform any analysis yet.
 
 You will now be provided with additional sections.
 
-- Default Primary curated data mappings are provided by the SYSTEM at runtime as ALLOWED_DIMENSION_ROWS and SELECTED_DEFAULT_DIMENSIONS.
+- Default Primary curated data mappings are provided by the SYSTEM at runtime as ALLOWED_DIMENSION_ROWS and SYSTEM_DEFAULT_DIMENSIONS.
 - You MUST choose genre/region/target/channel values ONLY from ALLOWED_DIMENSION_ROWS.
-- If the user does not specify a dimension explicitly, you MUST use SELECTED_DEFAULT_DIMENSIONS.
+- If the user does not specify a dimension explicitly, you MUST use SYSTEM_DEFAULT_DIMENSIONS.
 
 INSTRUCTIONS 01.06 = You must use these sections to select the correct BigQuery tables
 INSTRUCTIONS 01.07 = You must use these sections to choose the valid columns

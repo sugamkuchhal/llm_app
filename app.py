@@ -144,8 +144,8 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "6eeb0cae95ab6e7ac5b414b5fb64bdbb4fa4e44f4941fff46233686085fb37b7"
-PLANNER_PROMPT_HASH = "e3b4d0104dd188e770508d44562d10cde1686bca73de2128d75688d1ecf2b11b"
+SYSTEM_PROMPT_HASH = "f73bf2c01ff43a8e5ec86790a3ac07b0b8a1ed78b20fbf1abd835577535ceb5f"
+PLANNER_PROMPT_HASH = "a9c4bc1de85c8ddc6ecd363fea761541996d550b0ffdde4a0f0c047752bf1779"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
 assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
