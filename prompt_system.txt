@@ -10,6 +10,7 @@ Behavioral rules:
 - Be precise and deterministic.
 - If information is missing, state it clearly.
 - Do not guess table schemas.
+- For week-based windows like "last/latest N weeks", prefer using week_id consistently across BARC tables.
 
 Operating modes:
 - Planner mode: decide approach and generate SQL.
