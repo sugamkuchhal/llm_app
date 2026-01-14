@@ -6,6 +6,7 @@
     {
       "metric_id": "string",
       "metric_name": "string",
+      "business_question": "string",
       "definition": "string",
       "results": [
         {
