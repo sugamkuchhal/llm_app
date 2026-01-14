@@ -127,25 +127,92 @@ assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
 # Session memory
 # --------------------------------------------------
 def get_chat_history():
-    return session.setdefault("chat_history", [])
+    """
+    Returns the current chat history from the session.
+
+    Policy A (self-healing): if the stored value is malformed, reset it to [].
+    """
+    h = session.get("chat_history")
+    if h is None:
+        session["chat_history"] = []
+        return session["chat_history"]
+
+    if not isinstance(h, list):
+        session["chat_history"] = []
+        return session["chat_history"]
+
+    # Best-effort sanitization: keep only dict entries (stable shape downstream).
+    sanitized = [x for x in h if isinstance(x, dict)]
+    if sanitized is not h:
+        session["chat_history"] = sanitized
+    return session["chat_history"]
 
 def append_chat_turn(question, headline):
     h = get_chat_history()
-    h.append({"question": question, "headline": headline})
+
+    # Normalize to deterministic, JSON-serializable primitives.
+    q = (question or "")
+    if not isinstance(q, str):
+        q = str(q)
+    q = q.strip()
+
+    hl = None if headline is None else headline
+    if hl is not None and not isinstance(hl, str):
+        hl = str(hl)
+    if isinstance(hl, str):
+        hl = hl.strip()
+
+    h.append({"question": q, "headline": hl})
     session["chat_history"] = h[-MAX_TURNS:]
 
 def extract_metric_manifest(text: str):
+    """
+    Fail-fast extraction of the metric manifest.
+
+    Contract:
+    - Exactly one BEGIN_METRIC_MANIFEST and one END_METRIC_MANIFEST marker
+    - Content between markers must be a JSON array
+    """
+    begin = "BEGIN_METRIC_MANIFEST"
+    end = "END_METRIC_MANIFEST"
+
+    begin_count = text.count(begin)
+    end_count = text.count(end)
+    if begin_count != 1 or end_count != 1:
+        raise RuntimeError(
+            f"Invalid METRIC_MANIFEST markers: begin={begin_count}, end={end_count}"
+        )
+
+    begin_idx = text.find(begin)
+    end_idx = text.find(end)
+    if begin_idx == -1 or end_idx == -1 or end_idx <= begin_idx:
+        raise RuntimeError("Invalid METRIC_MANIFEST marker ordering")
+
+    block = text[begin_idx + len(begin):end_idx].strip()
+    logger.info("RAW METRIC_MANIFEST >>>\n%s\n<<< END METRIC_MANIFEST", block)
+
+    # Deterministic guard: the manifest must be a JSON array.
+    if not block.startswith("[") or not block.endswith("]"):
+        raise RuntimeError("METRIC_MANIFEST must be a JSON array")
+
     try:
-        block = text.split("BEGIN_METRIC_MANIFEST", 1)[1]
-        block = block.split("END_METRIC_MANIFEST", 1)[0]
-        logger.info("RAW METRIC_MANIFEST >>>\n%s\n<<< END METRIC_MANIFEST", block)
         return json.loads(block)
-    except Exception:
-        raise RuntimeError("Invalid or missing METRIC_MANIFEST block")
+    except json.JSONDecodeError as e:
+        # Include parse position for debuggability without attempting repair.
+        context_start = max(e.pos - 40, 0)
+        context_end = min(e.pos + 40, len(block))
+        context = block[context_start:context_end].replace("\n", "\\n")
+        raise RuntimeError(
+            f"Invalid METRIC_MANIFEST JSON at pos={e.pos}: {e.msg} | context='{context}'"
+        ) from e
 
 def validate_metric_sql_binding(metric_manifest, sql_blocks):
     """
-    Ensures metric ↔ SQL mapping is complete and consistent.
+    Ensures metric → SQL references are valid.
+
+    Deterministic policy: validate references only.
+    - Hard-fail if the manifest references SQL blocks that do not exist
+    - Do NOT fail if there are extra SQL blocks not referenced by the manifest
     """
     declared_sql_indices = set()
     for m in metric_manifest:
@@ -155,7 +222,6 @@ def validate_metric_sql_binding(metric_manifest, sql_blocks):
     extracted_sql_indices = {q["metric_index"] for q in sql_blocks}
 
     missing_sql = declared_sql_indices - extracted_sql_indices
-    unbound_sql = extracted_sql_indices - declared_sql_indices
 
     if missing_sql:
         logger.error(
@@ -166,17 +232,8 @@ def validate_metric_sql_binding(metric_manifest, sql_blocks):
             f"Metric manifest references missing SQL blocks: {sorted(missing_sql)}"
         )
 
-    if unbound_sql:
-        logger.error(
-            "SQL blocks not bound to any metric | unbound=%s",
-            sorted(unbound_sql)
-        )
-        raise RuntimeError(
-            f"SQL blocks not bound to any metric: {sorted(unbound_sql)}"
-        )
-
     logger.info(
-        "Metric ↔ SQL binding validated | metrics=%d | sql_blocks=%d",
+        "Metric → SQL references validated | metrics=%d | sql_blocks=%d",
         len(metric_manifest),
         len(sql_blocks)
     )
@@ -195,6 +252,11 @@ def build_metric_payload(metric_manifest, sql_results):
         metric_results = []
 
         for idx in m["sql_blocks"]:
+            if idx not in results_by_index:
+                metric_id = m.get("metric_id", "<unknown>")
+                raise RuntimeError(
+                    f"Missing executed SQL result for metric_id={metric_id} sql_block={idx}"
+                )
             metric_results.append(results_by_index[idx])
 
         metric_payload.append({
@@ -217,14 +279,34 @@ SQL_READ_ONLY_RE = re.compile(
 
 FORBIDDEN_SQL = re.compile(
     r"\b("
-    r"insert|update|delete|merge|create|drop|alter|truncate|"
-    r"grant|revoke|call|execute"
+    # DDL/DML
+    r"insert|update|delete|merge|create|drop|alter|truncate|replace|rename|"
+    # Privilege / procedure
+    r"grant|revoke|call|"
+    # BigQuery scripting / dynamic SQL (not allowed in read-only flow)
+    r"begin|end|declare|set|commit|rollback|execute\s+immediate|execute"
     r")\b",
     re.IGNORECASE
 )
 
 def validate_read_only_sql(sql: str, index: int):
-    clean_sql = strip_sql_comments(sql)
+    """
+    Strict read-only validation:
+    - Single statement only (no internal semicolons)
+    - Must start with SELECT/WITH (after stripping comments)
+    - Must not contain DDL/DML/scripting keywords
+    """
+    clean_sql = strip_sql_comments(sql).strip()
+
+    # Allow a single trailing semicolon, disallow any internal semicolons.
+    if clean_sql.endswith(";"):
+        clean_sql = clean_sql[:-1].rstrip()
+    if ";" in clean_sql:
+        raise RuntimeError(f"Multiple statements are not allowed (query #{index})")
+
+    if not SQL_READ_ONLY_RE.match(clean_sql):
+        raise RuntimeError(f"SQL must start with SELECT/WITH (query #{index})")
+
     match = FORBIDDEN_SQL.search(clean_sql)
     if match:
         logger.warning(
@@ -236,31 +318,51 @@ def validate_read_only_sql(sql: str, index: int):
         raise RuntimeError(f"Non read-only SQL in query #{index}")
 
 def extract_all_sql(text: str):
-    sql_blocks = []
-    i = 1
+    """
+    Extracts sequential SQL blocks.
 
-    while True:
+    Deterministic policy: fail fast on gaps/duplicates.
+    - If blocks exist, they must be numbered 1..N with no gaps and no duplicates.
+    - Each BEGIN_SQL_BLOCK_i must have a matching END_SQL_BLOCK_i.
+    """
+    begin_matches = re.findall(r"\bBEGIN_SQL_BLOCK_(\d+)\b", text)
+    if not begin_matches:
+        raise RuntimeError("No SQL blocks found")
+
+    indices = [int(x) for x in begin_matches]
+    if len(indices) != len(set(indices)):
+        raise RuntimeError(f"Duplicate SQL block numbers detected: {sorted(indices)}")
+
+    present = sorted(indices)
+    if present[0] != 1:
+        raise RuntimeError(f"SQL blocks must start at 1; found {present[0]}")
+
+    expected = list(range(1, present[-1] + 1))
+    if present != expected:
+        missing = sorted(set(expected) - set(present))
+        raise RuntimeError(
+            f"SQL block numbering must be sequential; missing blocks: {missing}"
+        )
+
+    sql_blocks = []
+    for i in expected:
         start = f"BEGIN_SQL_BLOCK_{i}"
         end = f"END_SQL_BLOCK_{i}"
 
-        if start not in text:
-            break
+        if text.count(start) != 1 or text.count(end) != 1:
+            raise RuntimeError(f"Invalid SQL block markers for block #{i}")
 
-        try:
-            block = text.split(start, 1)[1]
-            block = block.split(end, 1)[0].strip()
-            validate_read_only_sql(block, i)
-            sql_blocks.append({
-                "metric_index": i,
-                "sql": block
-            })
-        except Exception:
+        m = re.search(
+            rf"\b{re.escape(start)}\b\s*(.*?)\s*\b{re.escape(end)}\b",
+            text,
+            flags=re.DOTALL
+        )
+        if not m:
             raise RuntimeError(f"Invalid SQL block #{i}")
 
-        i += 1
-
-    if not sql_blocks:
-        raise RuntimeError("No SQL blocks found")
+        block = m.group(1).strip()
+        validate_read_only_sql(block, i)
+        sql_blocks.append({"metric_index": i, "sql": block})
 
     return sql_blocks
 
@@ -281,6 +383,13 @@ def run_all_bigquery(queries):
     for q in queries:
         dry_cfg = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
         dry_job = bq_client.query(q["sql"], job_config=dry_cfg, location=BQ_REGION)
+
+        # BigQuery-enforced check: only SELECT statements are allowed.
+        stmt_type = getattr(dry_job, "statement_type", None)
+        if stmt_type is not None and stmt_type.upper() != "SELECT":
+            raise RuntimeError(
+                f"Query #{q['metric_index']} is not read-only (statement_type={stmt_type})"
+            )
 
         if dry_job.total_bytes_processed > MAX_BQ_BYTES:
             raise RuntimeError(
