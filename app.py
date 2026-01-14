@@ -124,7 +124,7 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "684508a01ca429b46242bb5ac342cf9891a5c65274fb0cc9115e73af89388d0a"
+SYSTEM_PROMPT_HASH = "d02605672aa5a85fce67d63a429895bcc674e8bd9fdf64406ffff7211a8a470a"
 PLANNER_PROMPT_HASH = "423e2b23999532dda04c55f73aa0b69c44a953d9522780d1401460972ee2a117"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
@@ -373,6 +373,187 @@ def extract_all_sql(text: str):
         sql_blocks.append({"metric_index": i, "sql": block})
 
     return sql_blocks
+
+
+def extract_all_output_schema(text: str) -> dict[int, list[dict]]:
+    """
+    Extract OUTPUT_SCHEMA blocks (mandatory).
+
+    Deterministic policy: fail fast on gaps/duplicates.
+    - If any BEGIN_OUTPUT_SCHEMA_n exists, blocks must be numbered 1..N.
+    - Each BEGIN_OUTPUT_SCHEMA_n must have a matching END_OUTPUT_SCHEMA_n.
+    - Each schema must be a JSON array of field descriptors.
+    """
+    begin_matches = re.findall(r"\bBEGIN_OUTPUT_SCHEMA_(\d+)\b", text)
+    if not begin_matches:
+        raise RuntimeError("Planner returned no OUTPUT_SCHEMA blocks")
+
+    indices = [int(x) for x in begin_matches]
+    if len(indices) != len(set(indices)):
+        raise RuntimeError(f"Duplicate OUTPUT_SCHEMA block numbers detected: {sorted(indices)}")
+
+    present = sorted(indices)
+    if present[0] != 1:
+        raise RuntimeError(f"OUTPUT_SCHEMA blocks must start at 1; found {present[0]}")
+
+    expected = list(range(1, present[-1] + 1))
+    if present != expected:
+        missing = sorted(set(expected) - set(present))
+        raise RuntimeError(
+            f"OUTPUT_SCHEMA block numbering must be sequential; missing blocks: {missing}"
+        )
+
+    out: dict[int, list[dict]] = {}
+
+    for i in expected:
+        start = f"BEGIN_OUTPUT_SCHEMA_{i}"
+        end = f"END_OUTPUT_SCHEMA_{i}"
+
+        if text.count(start) != 1 or text.count(end) != 1:
+            raise RuntimeError(f"Invalid OUTPUT_SCHEMA markers for block #{i}")
+
+        m = re.search(
+            rf"\b{re.escape(start)}\b\s*(.*?)\s*\b{re.escape(end)}\b",
+            text,
+            flags=re.DOTALL
+        )
+        if not m:
+            raise RuntimeError(f"Invalid OUTPUT_SCHEMA block #{i}")
+
+        block = m.group(1).strip()
+        if not block.startswith("[") or not block.endswith("]"):
+            raise RuntimeError(f"OUTPUT_SCHEMA_{i} must be a JSON array")
+        try:
+            schema = json.loads(block)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"Invalid OUTPUT_SCHEMA_{i} JSON at pos={e.pos}: {e.msg}"
+            ) from e
+        if not isinstance(schema, list):
+            raise RuntimeError(f"OUTPUT_SCHEMA_{i} must be a JSON array")
+        out[i] = schema
+
+    return out
+
+
+def validate_output_schema(output_schema: list[dict], index: int):
+    """
+    Validate OUTPUT_SCHEMA for one SQL block.
+
+    Mandatory + fail-fast policy:
+    - Required keys and allowed values are enforced
+    - Must align with domain metadata for known columns (role/time)
+    """
+    if not isinstance(output_schema, list) or not output_schema:
+        raise RuntimeError(f"OUTPUT_SCHEMA_{index} must be a non-empty JSON array")
+
+    seen = set()
+
+    for item in output_schema:
+        if not isinstance(item, dict):
+            raise RuntimeError(f"OUTPUT_SCHEMA_{index} items must be objects")
+
+        name = item.get("name")
+        role = item.get("role")
+        if not isinstance(name, str) or not name.strip():
+            raise RuntimeError(f"OUTPUT_SCHEMA_{index} field.name must be a non-empty string")
+        name = name.strip()
+        if name.lower() in seen:
+            raise RuntimeError(f"OUTPUT_SCHEMA_{index} has duplicate field name: {name}")
+        seen.add(name.lower())
+
+        if role not in ("dimension", "kpi"):
+            raise RuntimeError(
+                f"OUTPUT_SCHEMA_{index} field.role must be 'dimension' or 'kpi' (field={name})"
+            )
+
+        dimension_type = item.get("dimension_type")
+        time_level = item.get("time_level")
+
+        if role == "kpi":
+            if "dimension_type" in item or "time_level" in item:
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA_{index} KPI field must not include dimension_type/time_level (field={name})"
+                )
+        else:
+            if dimension_type not in ("time", "categorical"):
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA_{index} dimension_type must be 'time' or 'categorical' (field={name})"
+                )
+            if dimension_type == "time":
+                if time_level not in ("year", "week", "date", "half_hour", "program_airing"):
+                    raise RuntimeError(
+                        f"OUTPUT_SCHEMA_{index} time_level invalid (field={name})"
+                    )
+            else:
+                if "time_level" in item:
+                    raise RuntimeError(
+                        f"OUTPUT_SCHEMA_{index} categorical dimension must not include time_level (field={name})"
+                    )
+
+        # Domain metadata alignment checks (only when column is known)
+        candidates = DOMAIN_COLUMN_INDEX.get(name.lower(), [])
+        if candidates:
+            meta_roles = {c.get("role") for c in candidates if c.get("role")}
+            if role == "kpi" and "dimension" in meta_roles:
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA_{index} role mismatch vs domain meta: {name} declared kpi but meta dimension"
+                )
+            if role == "dimension" and "kpi" in meta_roles:
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA_{index} role mismatch vs domain meta: {name} declared dimension but meta kpi"
+                )
+
+        # Time metadata alignment checks (only when time column is known)
+        known_time_level = DOMAIN_TIME_INDEX.get(name.lower())
+        if role == "dimension" and dimension_type == "time":
+            if not known_time_level:
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA_{index} time dimension not recognized in domain time hierarchy: {name}"
+                )
+            if time_level != known_time_level:
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA_{index} time_level mismatch for {name}: declared={time_level}, meta={known_time_level}"
+                )
+
+
+def _field_info_from_output_schema(
+    *,
+    output_schema: list[dict],
+    bq_schema: list[dict],
+) -> list[dict]:
+    """
+    Build charting field_info from the declared OUTPUT_SCHEMA, enriched with
+    BigQuery types and any available domain metadata.
+    """
+    bq_by_lower = {
+        (f.get("name") or "").lower(): f for f in (bq_schema or []) if isinstance(f, dict) and f.get("name")
+    }
+
+    field_info: list[dict] = []
+    for item in output_schema:
+        name = (item.get("name") or "").strip()
+        role = item.get("role")
+        dimension_type = item.get("dimension_type")
+        time_level = item.get("time_level")
+
+        bq = bq_by_lower.get(name.lower(), {})
+        meta_candidates = DOMAIN_COLUMN_INDEX.get(name.lower(), [])
+        best = meta_candidates[0] if meta_candidates else {}
+
+        field_info.append(
+            {
+                "name": name,
+                "bq_type": (bq or {}).get("type"),
+                "role": role,
+                "dimension_type": dimension_type if role == "dimension" else None,
+                "time_level": time_level if role == "dimension" and dimension_type == "time" else None,
+                "semantic_tags": best.get("semantic_tags", []),
+                "business_description": best.get("business_description"),
+            }
+        )
+
+    return field_info
 
 def strip_sql_comments(sql: str) -> str:
     """
@@ -624,7 +805,11 @@ def run_all_bigquery(queries):
     for q in queries:
         metric_index = q.get("metric_index")
         sql = q.get("sql", "")
+        output_schema = q.get("output_schema")
         try:
+            if not isinstance(output_schema, list) or not output_schema:
+                raise RuntimeError(f"Missing OUTPUT_SCHEMA for query #{metric_index}")
+
             dry_cfg = bigquery.QueryJobConfig(
                 dry_run=True,
                 use_query_cache=False,
@@ -653,13 +838,23 @@ def run_all_bigquery(queries):
             rows = [dict(row) for row in job.result(max_results=MAX_ROWS)]
             rows = _normalize_bq_rows(rows)
             schema = _bq_schema_to_json(job.schema)
-            field_names = [f.get("name") for f in schema if isinstance(f, dict) and f.get("name")]
-            if not field_names and rows:
-                field_names = sorted(rows[0].keys())
-            field_info = annotate_output_fields(
-                field_names=field_names,
-                schema=schema,
-                domain_meta=DOMAIN_META,
+
+            # Validate declared output schema against actual BigQuery output.
+            declared_names = [x.get("name") for x in output_schema if isinstance(x, dict)]
+            if any(not isinstance(n, str) or not n.strip() for n in declared_names):
+                raise RuntimeError(f"Invalid OUTPUT_SCHEMA field names for query #{metric_index}")
+            declared_names = [n.strip() for n in declared_names]  # type: ignore[assignment]
+
+            actual_names = [f.get("name") for f in schema if isinstance(f, dict) and f.get("name")]
+            if [n.lower() for n in declared_names] != [n.lower() for n in actual_names]:
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA mismatch for query #{metric_index}: "
+                    f"declared={declared_names} actual={actual_names}"
+                )
+
+            field_info = _field_info_from_output_schema(
+                output_schema=output_schema,
+                bq_schema=schema,
             )
 
             results.append({
@@ -668,6 +863,7 @@ def run_all_bigquery(queries):
                 "rows": rows,
                 "schema": schema,
                 "field_info": field_info,
+                "output_schema": output_schema,
             })
         except Exception as e:
             logger.exception("BigQuery execution failed | metric_index=%s", metric_index)
@@ -889,6 +1085,8 @@ def index():
                 },
                 extract_metric_manifest=extract_metric_manifest,
                 extract_all_sql=extract_all_sql,
+                extract_all_output_schema=extract_all_output_schema,
+                validate_output_schema=validate_output_schema,
                 validate_metric_sql_binding=validate_metric_sql_binding,
                 run_all_bigquery=run_all_bigquery,
                 build_metric_payload=build_metric_payload,

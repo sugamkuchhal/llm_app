@@ -61,6 +61,8 @@ def run_analysis(
     planner_ctx, 
     extract_metric_manifest,
     extract_all_sql,
+    extract_all_output_schema,
+    validate_output_schema,
     validate_metric_sql_binding,
     run_all_bigquery,
     build_metric_payload,
@@ -124,6 +126,15 @@ def run_analysis(
     # ---------------------------
     sql_blocks = extract_all_sql(planner_text)
     validate_metric_sql_binding(metric_manifest, sql_blocks)
+
+    # Output schema blocks (MANDATORY, deterministic)
+    output_schemas = extract_all_output_schema(planner_text)
+    for q in sql_blocks:
+        idx = q.get("metric_index")
+        if idx not in output_schemas:
+            raise RuntimeError(f"Missing OUTPUT_SCHEMA block for SQL block #{idx}")
+        validate_output_schema(output_schemas[idx], idx)
+        q["output_schema"] = output_schemas[idx]
 
     # ---- Dead-hours enforcement (default ON) ----
     if not has_dead_hours_filter(planner_text):

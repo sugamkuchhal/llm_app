@@ -42,7 +42,35 @@ BEGIN_SQL_BLOCK_2
 <SQL>
 END_SQL_BLOCK_2
 
-3) Filters (MANDATORY)
+3) Output Schema (MANDATORY)
+
+Rules:
+- Always include one OUTPUT_SCHEMA block for EACH SQL block.
+- OUTPUT_SCHEMA blocks MUST be numbered sequentially starting from 1
+- OUTPUT_SCHEMA_n corresponds to SQL_BLOCK_n
+- The schema MUST describe the FINAL output columns of the SQL query (including aliases)
+- Schema MUST be a JSON array only (no surrounding text)
+- Each item MUST include:
+  - name: exact output column name (string)
+  - role: "dimension" or "kpi"
+- If role="dimension", MUST include:
+  - dimension_type: "time" or "categorical"
+  - If dimension_type="time", MUST include:
+    - time_level: one of ["year","week","date","half_hour","program_airing"]
+- If role="kpi", do NOT include time_level/dimension_type
+- The declared schema MUST align with the domain metadata provided (role/time)
+
+FORMAT (STRICT):
+
+BEGIN_OUTPUT_SCHEMA_1
+<JSON ARRAY>
+END_OUTPUT_SCHEMA_1
+
+BEGIN_OUTPUT_SCHEMA_2
+<JSON ARRAY>
+END_OUTPUT_SCHEMA_2
+
+4) Filters (MANDATORY)
 
 Rules:
 - Always include BEGIN_FILTERS / END_FILTERS
