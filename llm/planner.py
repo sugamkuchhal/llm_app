@@ -11,8 +11,7 @@ def call_planner(
     system_prompt,
     planner_prompt,
     metadata,
-    default_data,
-    all_data,
+    dimension_defaults,
     model
 ):
     MAX_PLANNER_TURNS = int(os.getenv("MAX_PLANNER_TURNS", 4))
@@ -28,11 +27,8 @@ CHAT HISTORY:
 METADATA:
 {metadata}
 
-DEFAULT DATA:
-{default_data}
-
-ALL DATA:
-{all_data}
+DEFAULT_DIMENSIONS (SYSTEM-PROVIDED):
+{json.dumps(dimension_defaults, indent=2)}
 
 QUESTION:
 {question}

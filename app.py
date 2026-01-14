@@ -26,6 +26,7 @@ from validators.answer_validator import validate_answer
 from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
+from domain.barc.dimension_reference import fetch_default_dimension_rows
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
 from config.prompt_guard import assert_prompt_unchanged, hash_text
@@ -102,9 +103,7 @@ SYSTEM_PROMPT = load_file("prompt_system.txt")
 INTERPRETER_PROMPT = load_file("prompt_interpreter.txt")
 ANSWER_CONTRACT = load_file("contract_answer.json")
 
-ALL_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_all.json")
 PLANNER_PROMPT = load_file(f"domain/{DOMAIN}/{DOMAIN}_context_planner.txt")
-DEFAULT_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_default.json")
 META_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_meta.json")
 
 try:
@@ -1034,8 +1033,10 @@ def index():
                     "system_prompt": SYSTEM_PROMPT,
                     "planner_prompt": PLANNER_PROMPT,
                     "metadata": META_DATA,
-                    "default_data": DEFAULT_DATA,
-                    "all_data": ALL_DATA,
+                    "dimension_defaults": fetch_default_dimension_rows(
+                        bq_client=bq_client,
+                        limit=int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100")),
+                    ),
                     "model": planner_model,
                 },
                 extract_metric_manifest=extract_metric_manifest,
