@@ -44,3 +44,50 @@ def fetch_default_dimension_rows(
         for r in rows
     ]
 
+
+def pick_selected_default_row(*, question: str | None, default_rows: list[dict]) -> dict | None:
+    """
+    Deterministically pick the best matching default row for a question.
+
+    This is intentionally simple and stable:
+    - Prefer exact-ish matches by substring against the question text
+    - Tie-break by sorted (genre, region, target, channel)
+    """
+    if not default_rows:
+        return None
+
+    q = (question or "").lower()
+
+    def score(r: dict) -> tuple[int, tuple]:
+        s = 0
+        for k in ("genre", "region", "target", "channel"):
+            v = (r.get(k) or "")
+            if not isinstance(v, str) or not v:
+                continue
+            if v.lower() in q:
+                s += 1
+        # deterministic tie-breaker
+        t = (
+            (r.get("genre") or ""),
+            (r.get("region") or ""),
+            (r.get("target") or ""),
+            (r.get("channel") or ""),
+        )
+        return (s, t)
+
+    # pick max score; on tie, pick smallest lexicographically by t (stable)
+    best = None
+    for r in default_rows:
+        if not isinstance(r, dict):
+            continue
+        sc = score(r)
+        if best is None:
+            best = (sc, r)
+            continue
+        if sc[0] > best[0][0]:
+            best = (sc, r)
+        elif sc[0] == best[0][0] and sc[1] < best[0][1]:
+            best = (sc, r)
+
+    return best[1] if best else default_rows[0]
+

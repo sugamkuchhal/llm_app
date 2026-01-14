@@ -31,8 +31,9 @@ INSTRUCTIONS 01.05 = Do NOT perform any analysis yet.
 
 You will now be provided with additional sections.
 
-- Default Primary curated data mappings = The unique values from tables for channel, genre, region, target. This is to be used for default queries. Do not query for Region and Target unless specified. Use the defaults.
-- Complete reference data mappings = The unique values from tables for channel, genre, region, target. This will help in better queries.
+- Default Primary curated data mappings are provided by the SYSTEM at runtime as DEFAULT_DIMENSION_ROWS and SELECTED_DEFAULT_DIMENSIONS.
+- You MUST choose genre/region/target/channel values ONLY from DEFAULT_DIMENSION_ROWS.
+- If the user does not specify a dimension explicitly, you MUST use SELECTED_DEFAULT_DIMENSIONS.
 
 INSTRUCTIONS 01.06 = You must use these sections to select the correct BigQuery tables
 INSTRUCTIONS 01.07 = You must use these sections to choose the valid columns

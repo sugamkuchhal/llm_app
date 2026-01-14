@@ -26,7 +26,10 @@ from validators.answer_validator import validate_answer
 from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
-from domain.barc.barc_dimension_reference import fetch_default_dimension_rows
+from domain.barc.barc_dimension_reference import (
+    fetch_default_dimension_rows,
+    pick_selected_default_row,
+)
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
 from config.prompt_guard import assert_prompt_unchanged, hash_text
@@ -112,7 +115,7 @@ except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
 SYSTEM_PROMPT_HASH = "d02605672aa5a85fce67d63a429895bcc674e8bd9fdf64406ffff7211a8a470a"
-PLANNER_PROMPT_HASH = "ac3fa1ea279e9f3633984c60f1c464ba54b24d36088182d60b2151ab43ff2497"
+PLANNER_PROMPT_HASH = "fe77f15ccbbc0f99b8825b8ab5f027e372d90d92373f0c3c1ad240a510e70a14"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
 assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
@@ -1024,6 +1027,20 @@ def index():
         try:
             question = request.form["question"]  # ✅ FIX
 
+            default_rows = fetch_default_dimension_rows(
+                bq_client=bq_client,
+                limit=(
+                    None
+                    if os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100").strip().lower()
+                    in {"infinite", "all", "none", "unlimited", "0", "-1"}
+                    else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
+                ),
+            )
+            selected_default = pick_selected_default_row(
+                question=question,
+                default_rows=default_rows,
+            )
+
             result = run_analysis(
                 question=question,
                 session=session,
@@ -1033,15 +1050,8 @@ def index():
                     "system_prompt": SYSTEM_PROMPT,
                     "planner_prompt": PLANNER_PROMPT,
                     "metadata": META_DATA,
-                    "dimension_defaults": fetch_default_dimension_rows(
-                        bq_client=bq_client,
-                        limit=(
-                            None
-                            if os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100").strip().lower()
-                            in {"infinite", "all", "none", "unlimited", "0", "-1"}
-                            else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
-                        ),
-                    ),
+                    "default_dimension_rows": default_rows,
+                    "selected_default_dimensions": selected_default,
                     "model": planner_model,
                 },
                 extract_metric_manifest=extract_metric_manifest,
