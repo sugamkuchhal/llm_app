@@ -243,7 +243,16 @@ def extract_filters(planner_text: str) -> dict:
     if missing:
         raise RuntimeError(f"FILTERS block missing required keys: {missing}")
 
-    filters_list = [f"{k}: {parsed[k]['value']}" for k in required]
+    NO_FILTER_SENTINEL = "__NO_FILTER__"
+
+    def _is_no_filter(v: str) -> bool:
+        vv = (v or "").strip()
+        return vv == NO_FILTER_SENTINEL or vv.upper() == "ALL"
+
+    def _display(v: str) -> str:
+        return "(no filter)" if _is_no_filter(v) else v
+
+    filters_list = [f"{k}: {_display(parsed[k]['value'])}" for k in required]
     return {"filters": parsed, "filters_list": filters_list}
 
 
@@ -262,6 +271,14 @@ def make_validate_filters(
     - SQL must not contain region/target equality filters when FILTERS says ALL
     """
     q = (question or "").lower()
+    NO_FILTER_SENTINEL = "__NO_FILTER__"
+
+    def _is_no_filter(v: str) -> bool:
+        vv = (v or "").strip()
+        return vv == NO_FILTER_SENTINEL or vv.upper() == "ALL"
+
+    def _display(v: str) -> str:
+        return "(no filter)" if _is_no_filter(v) else v
 
     def _contains_any(values: set[str]) -> bool:
         for v in values:
@@ -374,16 +391,16 @@ def make_validate_filters(
 
         # Force region/target to ALL unless user specified them.
         default_notes: list[str] = []
-        if not user_specified_region and region.upper() != "ALL":
-            f["region"]["value"] = "ALL"
-            region = "ALL"
+        if not user_specified_region and not _is_no_filter(region):
+            f["region"]["value"] = NO_FILTER_SENTINEL
+            region = NO_FILTER_SENTINEL
             if selected_default_dimensions and "region" in selected_default_dimensions:
                 default_notes.append(
                     f"Default Region (not applied): {selected_default_dimensions.get('region')}"
                 )
-        if not user_specified_target and target.upper() != "ALL":
-            f["target"]["value"] = "ALL"
-            target = "ALL"
+        if not user_specified_target and not _is_no_filter(target):
+            f["target"]["value"] = NO_FILTER_SENTINEL
+            target = NO_FILTER_SENTINEL
             if selected_default_dimensions and "target" in selected_default_dimensions:
                 default_notes.append(
                     f"Default Target (not applied): {selected_default_dimensions.get('target')}"
@@ -391,7 +408,7 @@ def make_validate_filters(
 
         # Rebuild the user-visible list after any normalization.
         parsed_filters["filters_list"] = [
-            f"{k}: {f[k]['value']}" for k in ["genre", "region", "target", "channel", "time_window"]
+            f"{k}: {_display(f[k]['value'])}" for k in ["genre", "region", "target", "channel", "time_window"]
         ] + default_notes
 
         def _sql_touches(sql: str, table: str) -> bool:
@@ -492,17 +509,17 @@ def make_validate_filters(
             if (touches_time_band or touches_program) and not include_dead_hours:
                 _require_dead_hours_exclusion(sql)
 
-            if region.upper() == "ALL":
+            if _is_no_filter(region):
                 if re.search(r"\bregion\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
                     raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
-            if target.upper() == "ALL":
+            if _is_no_filter(target):
                 if re.search(r"\btarget\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
                     raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
 
         # Validate non-ALL values are in allowed rows (column-wise)
         for col in ("genre", "region", "target", "channel"):
             val = (f[col]["value"] or "").strip()
-            if val.upper() == "ALL":
+            if _is_no_filter(val):
                 continue
             if val.lower() not in allowed_by_col.get(col, set()):
                 raise RuntimeError(
@@ -514,7 +531,7 @@ def make_validate_filters(
         r = (f["region"]["value"] or "").strip()
         t = (f["target"]["value"] or "").strip()
         c = (f["channel"]["value"] or "").strip()
-        if all(x and x.upper() != "ALL" for x in (g, r, t, c)):
+        if all(x and not _is_no_filter(x) for x in (g, r, t, c)):
             if not _tuple_exists(g, r, t, c):
                 suggestion = _suggest_tuple(g, r, t, c)
                 raise RuntimeError(
@@ -1417,10 +1434,20 @@ def index():
                         return f.split(":", 1)[-1].strip()
                 return None
             
-            resolved_genre = _extract_dim(filters, "genre")
-            resolved_region = _extract_dim(filters, "region")
-            resolved_target = _extract_dim(filters, "target")
-            resolved_channel = _extract_dim(filters, "channel")
+            def _normalize_no_filter(v: str | None) -> str | None:
+                if not v:
+                    return None
+                vv = v.strip()
+                if vv in {"__NO_FILTER__", "(no filter)"}:
+                    return None
+                if vv.upper() == "ALL":
+                    return None
+                return vv
+
+            resolved_genre = _normalize_no_filter(_extract_dim(filters, "genre"))
+            resolved_region = _normalize_no_filter(_extract_dim(filters, "region"))
+            resolved_target = _normalize_no_filter(_extract_dim(filters, "target"))
+            resolved_channel = _normalize_no_filter(_extract_dim(filters, "channel"))
             
             shadow_dims = shadow_resolve_dimensions_bq(
                 bq_client=bq_client,

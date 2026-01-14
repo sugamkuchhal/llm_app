@@ -81,18 +81,18 @@ Rules:
   - target
   - channel
   - time_window
-- If a dimension is not constrained, set its value to "ALL"
+- If a dimension is not constrained, set its value to "__NO_FILTER__"
 - Do NOT omit the FILTERS block under any circumstances
 - It the filters are coming from defaults, please mention the same as well
 
 FORMAT (STRICT):
 
 BEGIN_FILTERS
-- genre: <DEFAULT>: <value or ALL>
-- region: <DEFAULT>: <value or ALL>
-- target: <DEFAULT>: <value or ALL>
-- channel: <DEFAULT>: <value or ALL>
-- time_window: <DEFAULT>: <value or ALL>
+- genre: <DEFAULT>: <value or __NO_FILTER__>
+- region: <DEFAULT>: <value or __NO_FILTER__>
+- target: <DEFAULT>: <value or __NO_FILTER__>
+- channel: <DEFAULT>: <value or __NO_FILTER__>
+- time_window: <DEFAULT>: <value or __NO_FILTER__>
 END_FILTERS
 
 RULES:
