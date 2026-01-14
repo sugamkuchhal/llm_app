@@ -252,6 +252,11 @@ def build_metric_payload(metric_manifest, sql_results):
         metric_results = []
 
         for idx in m["sql_blocks"]:
+            if idx not in results_by_index:
+                metric_id = m.get("metric_id", "<unknown>")
+                raise RuntimeError(
+                    f"Missing executed SQL result for metric_id={metric_id} sql_block={idx}"
+                )
             metric_results.append(results_by_index[idx])
 
         metric_payload.append({
