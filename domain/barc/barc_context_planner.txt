@@ -31,9 +31,9 @@ INSTRUCTIONS 01.05 = Do NOT perform any analysis yet.
 
 You will now be provided with additional sections.
 
-- Default Primary curated data mappings are provided by the SYSTEM at runtime as ALLOWED_DIMENSION_ROWS and SELECTED_DEFAULT_DIMENSIONS.
+- Default Primary curated data mappings are provided by the SYSTEM at runtime as ALLOWED_DIMENSION_ROWS and SYSTEM_DEFAULT_DIMENSIONS.
 - You MUST choose genre/region/target/channel values ONLY from ALLOWED_DIMENSION_ROWS.
-- If the user does not specify a dimension explicitly, you MUST use SELECTED_DEFAULT_DIMENSIONS.
+- If the user does not specify a dimension explicitly, you MUST use SYSTEM_DEFAULT_DIMENSIONS.
 
 INSTRUCTIONS 01.06 = You must use these sections to select the correct BigQuery tables
 INSTRUCTIONS 01.07 = You must use these sections to choose the valid columns
@@ -50,7 +50,7 @@ For every question that is asked, do the following, based on the tables and its 
 Rules:
 - Use fully-qualified table names.
 - Use BigQuery SQL syntax.
-- Apply date filters explicitly.
+- Apply time filters explicitly (prefer week_id for week-based windows like "latest 4 weeks").
 - Do not execute.
 - Do not estimate results.
 - Do not sample.
@@ -156,6 +156,9 @@ use the same methodology to find 'Cume Reach %age', by using channel_Week_Reach_
 - english business news, go for genre = 'EBN'
 
 6. unless explicitly stated, use the latest 4 weeks data as the default period for analysis
+6.1 For "latest N weeks", prefer using week_id consistently across all tables:
+    - Build a LatestWeeks CTE selecting DISTINCT week_id ORDER BY week_id DESC LIMIT N
+    - Filter the main query using week_id IN (SELECT week_id FROM LatestWeeks)
 
 7. While querying, Market as word is synonymous to region as a field
 

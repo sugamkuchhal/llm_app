@@ -144,8 +144,8 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "6eeb0cae95ab6e7ac5b414b5fb64bdbb4fa4e44f4941fff46233686085fb37b7"
-PLANNER_PROMPT_HASH = "e3b4d0104dd188e770508d44562d10cde1686bca73de2128d75688d1ecf2b11b"
+SYSTEM_PROMPT_HASH = "f8cf685f426bb36d2e48dafced4cbbb9ca551c3f6b4c5c2dd9ed7398cbc49c16"
+PLANNER_PROMPT_HASH = "ce28b3fc8687ad1b98943ffe220ad0d3132db737bcb7f8fb42a78285a9e39d1d"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
 assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
@@ -499,12 +499,24 @@ def make_validate_filters(
 
         def _require_last_n_weeks_week_id(sql: str, n: int):
             s = (sql or "").lower()
-            # Common pattern: LatestWeeks CTE selecting distinct week_id order by desc limit N
-            pat = rf"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+{n}\b"
-            if not re.search(pat, s):
+            # Require both:
+            # 1) a "latest N week_id" selector (CTE/subquery)
+            # 2) usage of those week_ids to filter/join the main query
+            pat_latest = rf"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+{n}\b"
+            pat_use = (
+                r"\bweek_id\b\s+in\s*\(\s*select\s+week_id\b"
+                r"|join[\s\S]*\bweek_id\b"
+                r"|where[\s\S]*\bweek_id\b\s*(=|in|between|>=|>)"
+            )
+            ok = bool(re.search(pat_latest, s) and re.search(pat_use, s))
+            if not ok:
+                snippet = (sql or "").strip().replace("\n", " ")
+                snippet = (snippet[:800] + "...(truncated)") if len(snippet) > 800 else snippet
                 raise RuntimeError(
-                    f"Missing 'latest {n} weeks' filter for channel_table (week_id). "
-                    f"Expected pattern selecting DISTINCT week_id ORDER BY week_id DESC LIMIT {n}."
+                    f"Missing 'latest {n} weeks' week_id filter. "
+                    f"Expected a DISTINCT week_id ORDER BY week_id DESC LIMIT {n} selector "
+                    f"and usage of those week_ids to constrain the query (e.g., week_id IN (...)). "
+                    f"SQL_snippet={snippet}"
                 )
 
         def _require_last_n_weeks_date(sql: str, date_col: str, n: int):
@@ -565,23 +577,14 @@ def make_validate_filters(
 
             # Enforce last 4 weeks by default when user didn't specify.
             if not user_specified_time:
-                # channel_table: use week_id latest 4
-                if touches_channel:
+                # Consistent policy: use week_id latest 4 across all BARC tables.
+                if touches_channel or touches_time_band or touches_program:
                     _require_last_n_weeks_week_id(sql, 4)
-                # time_band/program: use date columns last 4 weeks
-                if touches_time_band:
-                    _require_last_n_weeks_date(sql, "time_band_date", 4)
-                if touches_program:
-                    _require_last_n_weeks_date(sql, "program_date", 4)
             else:
                 # If user specified a time window, enforce something consistent.
                 if n_weeks is not None:
-                    if touches_channel:
+                    if touches_channel or touches_time_band or touches_program:
                         _require_last_n_weeks_week_id(sql, n_weeks)
-                    if touches_time_band:
-                        _require_last_n_weeks_date(sql, "time_band_date", n_weeks)
-                    if touches_program:
-                        _require_last_n_weeks_date(sql, "program_date", n_weeks)
                 else:
                     # Unknown explicit window: require some filter on the correct date columns.
                     if touches_time_band:

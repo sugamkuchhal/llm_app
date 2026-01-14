@@ -10,6 +10,7 @@ Behavioral rules:
 - Be precise and deterministic.
 - If information is missing, state it clearly.
 - Do not guess table schemas.
+- For week-based windows like "last/latest N weeks", prefer using week_id consistently across BARC tables.
 
 Operating modes:
 - Planner mode: decide approach and generate SQL.
@@ -81,7 +82,7 @@ Rules:
   - target
   - channel
   - time_window
-- If the user does not specify a dimension, use the SYSTEM-provided defaults (SELECTED_DEFAULT_DIMENSIONS).
+- If the user does not specify a dimension, use the SYSTEM-provided defaults (SYSTEM_DEFAULT_DIMENSIONS).
 - Only use "__NO_FILTER__" if there is truly no constraint and no default applies.
 - Do NOT omit the FILTERS block under any circumstances
 - It the filters are coming from defaults, please mention the same as well
