@@ -71,11 +71,38 @@ MAX_ROWS = int(os.getenv("MAX_ROWS", 50000))
 # --------------------------------------------------
 # Init
 # --------------------------------------------------
-vertexai.init(project=PROJECT_ID, location=VERTEX_REGION)
+_bq_client = None
+_planner_model = None
+_interpreter_model = None
+_vertex_inited = False
 
-bq_client = bigquery.Client(location=BQ_REGION)
-planner_model = GenerativeModel("gemini-2.5-pro")
-interpreter_model = GenerativeModel("gemini-2.5-pro")
+
+def get_bq_client():
+    """
+    Lazily initialize BigQuery client.
+
+    Cloud Run should provide ADC via the service account. Initializing lazily
+    prevents container startup failure when credentials aren't available yet.
+    """
+    global _bq_client
+    if _bq_client is None:
+        _bq_client = bigquery.Client(project=PROJECT_ID, location=BQ_REGION)
+    return _bq_client
+
+
+def get_models():
+    """
+    Lazily initialize Vertex AI and the LLM model handles.
+    """
+    global _vertex_inited, _planner_model, _interpreter_model
+    if not _vertex_inited:
+        vertexai.init(project=PROJECT_ID, location=VERTEX_REGION)
+        _vertex_inited = True
+    if _planner_model is None:
+        _planner_model = GenerativeModel("gemini-2.5-pro")
+    if _interpreter_model is None:
+        _interpreter_model = GenerativeModel("gemini-2.5-pro")
+    return _planner_model, _interpreter_model
 
 app = Flask(__name__)
 app.jinja_env.filters["markdown"] = lambda text: markdown.markdown(text or "")
@@ -117,7 +144,7 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "d02605672aa5a85fce67d63a429895bcc674e8bd9fdf64406ffff7211a8a470a"
+SYSTEM_PROMPT_HASH = "6eeb0cae95ab6e7ac5b414b5fb64bdbb4fa4e44f4941fff46233686085fb37b7"
 PLANNER_PROMPT_HASH = "e3b4d0104dd188e770508d44562d10cde1686bca73de2128d75688d1ecf2b11b"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
@@ -1415,6 +1442,11 @@ def index():
         try:
             question = request.form["question"]  # ✅ FIX
 
+            # Lazily initialize clients/models so the container can start even if
+            # credentials aren't available during import time.
+            bq_client = get_bq_client()
+            planner_model, interpreter_model = get_models()
+
             default_rows = fetch_default_dimension_rows(
                 bq_client=bq_client,
                 limit=(
@@ -1572,4 +1604,6 @@ def debug_logs():
     }
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True, use_reloader=False)
+    port = int(os.getenv("PORT", "8080"))
+    debug = os.getenv("FLASK_DEBUG", "0").strip() in {"1", "true", "yes"}
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)

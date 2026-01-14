@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches
+.pytest_cache/
+
+# Virtualenvs
+.venv/
+venv/
+
+# OS files
+.DS_Store
