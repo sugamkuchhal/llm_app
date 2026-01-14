@@ -332,6 +332,10 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
 
     def validate_filters_impl(*, parsed_filters: dict, sql_blocks: list[dict], question: str, planner_text: str):
         f = parsed_filters["filters"]
+        # IMPORTANT POLICY (simplified):
+        # - If the user did NOT specify region/target in the question, we do NOT apply those filters.
+        #   We force FILTERS.region/FILTERS.target to ALL (instead of failing), and also enforce
+        #   that SQL does not contain region/target predicates.
         region = (f["region"]["value"] or "").strip()
         target = (f["target"]["value"] or "").strip()
         time_window = (f["time_window"]["value"] or "").strip()
@@ -362,16 +366,18 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
             or re.search(r"\ball\s+hours\b|\b24x7\b|\b24\s*/\s*7\b", qtext)
         )
 
-        # Enforce "do not query region/target unless specified"
+        # Force region/target to ALL unless user specified them.
         if not user_specified_region and region.upper() != "ALL":
-            raise RuntimeError("Region must be ALL unless the user specifies a region")
-        if user_specified_region and region.upper() == "ALL":
-            raise RuntimeError("User specified a region, but FILTERS sets region=ALL")
-
+            f["region"]["value"] = "ALL"
+            region = "ALL"
         if not user_specified_target and target.upper() != "ALL":
-            raise RuntimeError("Target must be ALL unless the user specifies a target")
-        if user_specified_target and target.upper() == "ALL":
-            raise RuntimeError("User specified a target, but FILTERS sets target=ALL")
+            f["target"]["value"] = "ALL"
+            target = "ALL"
+
+        # Rebuild the user-visible list after any normalization.
+        parsed_filters["filters_list"] = [
+            f"{k}: {f[k]['value']}" for k in ["genre", "region", "target", "channel", "time_window"]
+        ]
 
         def _sql_touches(sql: str, table: str) -> bool:
             s = (sql or "").lower()
