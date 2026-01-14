@@ -86,6 +86,14 @@ def run_analysis(
     # SQL extraction + execution
     # ---------------------------
     sql_blocks = extract_all_sql(planner_text)
+
+    # Log SQL blocks (truncated) so Cloud Run logs always show what was generated.
+    for qb in sql_blocks or []:
+        idx = qb.get("metric_index")
+        sql = (qb.get("sql", "") or "").strip()
+        snippet = (sql[:1200] + "...(truncated)") if len(sql) > 1200 else sql
+        logger.info("SQL block extracted | index=%s | sql_snippet=%s", idx, snippet)
+
     validate_metric_sql_binding(metric_manifest, sql_blocks)
 
     # Output schema blocks (MANDATORY, deterministic)

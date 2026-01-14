@@ -530,12 +530,15 @@ def make_validate_filters(
                 or re.search(rf"{col_or_datecol}\s+between\s+{sub_days}\s+and\s+{cur_date}", s)
             )
             if not ok:
+                snippet = (sql or "").strip().replace("\n", " ")
+                snippet = (snippet[:800] + "...(truncated)") if len(snippet) > 800 else snippet
                 raise RuntimeError(
                     f"Missing 'last {n} weeks' date filter on {date_col}. "
                     f"Expected patterns like "
                     f"{date_col} >= DATE_SUB(CURRENT_DATE(), INTERVAL {n} WEEK) "
                     f"or {date_col} BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {n} WEEK) AND CURRENT_DATE() "
-                    f"(also accepts DATE({date_col}) wrappers and {days} DAY equivalent)."
+                    f"(also accepts DATE({date_col}) wrappers and {days} DAY equivalent). "
+                    f"SQL_snippet={snippet}"
                 )
 
         def _require_some_date_filter(sql: str, date_col: str):
