@@ -1,4 +1,5 @@
 flask
+gunicorn
 google-cloud-bigquery
 google-cloud-aiplatform
 vertexai
@@ -9,14 +10,3 @@ pandas
 numpy
 jinja2
 requests
-hashlib
-uuid
-logging
-json
-os
--- re
--- time
--- gunicorn
-
-
-
