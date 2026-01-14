@@ -9,6 +9,9 @@ Set these on the Cloud Run service:
 
 - `LOG_LEVEL=DEBUG` (or `INFO` when stable)
 - `LOG_FORMAT=json` (recommended; makes filtering/export easier)
+- `ENABLE_LOG_BUFFER=1` (optional; enables in-memory log buffer for `/\_debug/logs`)
+- `LOG_BUFFER_SIZE=2000` (optional; max log entries to keep)
+- `DEBUG_TOKEN=<some-long-random-string>` (required if using `/\_debug/logs`)
 
 ## 2) Find the `request_id`
 
@@ -108,4 +111,14 @@ gcloud logging read \
 For a failing request, share:
 - all log entries for that `request_id` **including the stack trace**
 - the user question (if possible)
+
+## 6) Fastest method (no Logs Explorer export): `/_debug/logs`
+
+If you set `ENABLE_LOG_BUFFER=1` and `DEBUG_TOKEN`, you can fetch logs directly from the service:
+
+```
+https://<your-cloud-run-url>/_debug/logs?token=DEBUG_TOKEN&request_id=REPLACE_WITH_REQUEST_ID&limit=500
+```
+
+This returns JSON that you can copy/paste into chat.
 

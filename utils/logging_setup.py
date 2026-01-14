@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+from collections import deque
 from contextvars import ContextVar
 from datetime import datetime, timezone
 
@@ -38,6 +39,47 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
+class InMemoryLogBufferHandler(logging.Handler):
+    """
+    Keeps a ring buffer of recent log records for debugging without Cloud Logging export.
+    """
+
+    def __init__(self, capacity: int = 2000):
+        super().__init__()
+        self.capacity = max(10, int(capacity))
+        self._buf: deque[dict] = deque(maxlen=self.capacity)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": record.levelname,
+                "logger": record.name,
+                "request_id": getattr(record, "request_id", None),
+                "msg": record.getMessage(),
+            }
+            if record.exc_info and self.formatter:
+                entry["exc_info"] = self.formatter.formatException(record.exc_info)
+            self._buf.append(entry)
+        except Exception:
+            # Never let logging failures crash the app.
+            return
+
+    def get(self, *, request_id: str | None = None, limit: int = 500) -> list[dict]:
+        limit = max(1, min(int(limit), self.capacity))
+        items = list(self._buf)
+        if request_id:
+            items = [x for x in items if x.get("request_id") == request_id]
+        return items[-limit:]
+
+
+_LOG_BUFFER: InMemoryLogBufferHandler | None = None
+
+
+def get_log_buffer() -> InMemoryLogBufferHandler | None:
+    return _LOG_BUFFER
+
+
 def configure_logging() -> None:
     """
     Configure application-wide logging.
@@ -66,6 +108,16 @@ def configure_logging() -> None:
             )
         handler.addFilter(RequestIdFilter())
         root.addHandler(handler)
+
+        # Optional in-memory log buffer.
+        if os.getenv("ENABLE_LOG_BUFFER", "0") == "1":
+            global _LOG_BUFFER
+            _LOG_BUFFER = InMemoryLogBufferHandler(
+                capacity=int(os.getenv("LOG_BUFFER_SIZE", "2000"))
+            )
+            _LOG_BUFFER.setFormatter(handler.formatter)
+            _LOG_BUFFER.addFilter(RequestIdFilter())
+            root.addHandler(_LOG_BUFFER)
 
     # Reduce noisy frameworks by default; can still be overridden via LOG_LEVEL.
     logging.getLogger("werkzeug").setLevel(max(level, logging.WARNING))
