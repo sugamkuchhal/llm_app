@@ -243,11 +243,26 @@ def extract_filters(planner_text: str) -> dict:
     if missing:
         raise RuntimeError(f"FILTERS block missing required keys: {missing}")
 
-    filters_list = [f"{k}: {parsed[k]['value']}" for k in required]
+    NO_FILTER_SENTINEL = "__NO_FILTER__"
+
+    def _is_no_filter(v: str) -> bool:
+        vv = (v or "").strip()
+        return vv == NO_FILTER_SENTINEL or vv.upper() == "ALL"
+
+    def _display(v: str) -> str:
+        return "(no filter)" if _is_no_filter(v) else v
+
+    filters_list = [f"{k}: {_display(parsed[k]['value'])}" for k in required]
     return {"filters": parsed, "filters_list": filters_list}
 
 
-def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], question: str):
+def make_validate_filters(
+    *,
+    allowed_rows: list[dict],
+    candidates: list[dict],
+    question: str,
+    selected_default_dimensions: dict | None = None,
+):
     """
     Create a validator closure that enforces:
     - region/target must be ALL unless user specified them in the question (best-effort)
@@ -256,6 +271,14 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
     - SQL must not contain region/target equality filters when FILTERS says ALL
     """
     q = (question or "").lower()
+    NO_FILTER_SENTINEL = "__NO_FILTER__"
+
+    def _is_no_filter(v: str) -> bool:
+        vv = (v or "").strip()
+        return vv == NO_FILTER_SENTINEL or vv.upper() == "ALL"
+
+    def _display(v: str) -> str:
+        return "(no filter)" if _is_no_filter(v) else v
 
     def _contains_any(values: set[str]) -> bool:
         for v in values:
@@ -332,6 +355,11 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
 
     def validate_filters_impl(*, parsed_filters: dict, sql_blocks: list[dict], question: str, planner_text: str):
         f = parsed_filters["filters"]
+        # IMPORTANT POLICY (simplified):
+        # - If the user did NOT specify region/target in the question, we APPLY selected defaults
+        #   from SELECTED_DEFAULT_DIMENSIONS (instead of using the no-filter sentinel).
+        # - If FILTERS indicates no-filter for region/target, SQL must not contain those predicates.
+        # - If FILTERS indicates a specific region/target, SQL must include the corresponding predicate.
         region = (f["region"]["value"] or "").strip()
         target = (f["target"]["value"] or "").strip()
         time_window = (f["time_window"]["value"] or "").strip()
@@ -356,27 +384,78 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
             if not re.search(r"\b4\b.*\bweek", time_window.lower()):
                 raise RuntimeError("Time Window must default to Last 4 Weeks when user does not specify a time window")
 
+        def _sql_touches(sql: str, table: str) -> bool:
+            s = (sql or "").lower()
+            # handle backticks and optional project prefix
+            return f"barc_slm_poc.{table}".lower() in s
+
         # Dead-hours: exclude by default for time_band/program unless user explicitly includes.
         include_dead_hours = bool(
             re.search(r"\b(include|including|with)\s+dead\s+hours\b", qtext)
             or re.search(r"\ball\s+hours\b|\b24x7\b|\b24\s*/\s*7\b", qtext)
         )
 
-        # Enforce "do not query region/target unless specified"
-        if not user_specified_region and region.upper() != "ALL":
-            raise RuntimeError("Region must be ALL unless the user specifies a region")
-        if user_specified_region and region.upper() == "ALL":
-            raise RuntimeError("User specified a region, but FILTERS sets region=ALL")
+        # Apply region/target defaults unless user specified them.
+        default_notes: list[str] = []
+        if user_specified_region and _is_no_filter(region):
+            raise RuntimeError("User specified a region, but FILTERS region is not constrained")
+        if user_specified_target and _is_no_filter(target):
+            raise RuntimeError("User specified a target, but FILTERS target is not constrained")
 
-        if not user_specified_target and target.upper() != "ALL":
-            raise RuntimeError("Target must be ALL unless the user specifies a target")
-        if user_specified_target and target.upper() == "ALL":
-            raise RuntimeError("User specified a target, but FILTERS sets target=ALL")
+        if not user_specified_region and _is_no_filter(region):
+            chosen = (selected_default_dimensions or {}).get("region")
+            if chosen and not _is_no_filter(str(chosen)):
+                f["region"]["value"] = str(chosen)
+                region = str(chosen)
+                default_notes.append(f"Default Region (applied): {chosen}")
+            else:
+                f["region"]["value"] = NO_FILTER_SENTINEL
+                region = NO_FILTER_SENTINEL
+                default_notes.append("Default Region: (no filter)")
 
-        def _sql_touches(sql: str, table: str) -> bool:
-            s = (sql or "").lower()
-            # handle backticks and optional project prefix
-            return f"barc_slm_poc.{table}".lower() in s
+        if not user_specified_target and _is_no_filter(target):
+            chosen = (selected_default_dimensions or {}).get("target")
+            if chosen and not _is_no_filter(str(chosen)):
+                f["target"]["value"] = str(chosen)
+                target = str(chosen)
+                default_notes.append(f"Default Target (applied): {chosen}")
+            else:
+                f["target"]["value"] = NO_FILTER_SENTINEL
+                target = NO_FILTER_SENTINEL
+                default_notes.append("Default Target: (no filter)")
+
+        # Decide whether dead-hours is relevant for display (only if the query touches those tables).
+        touches_dead_hours_tables = False
+        for qb in sql_blocks or []:
+            sql = qb.get("sql", "") or ""
+            if _sql_touches(sql, "time_band_table") or _sql_touches(sql, "program_table"):
+                touches_dead_hours_tables = True
+                break
+
+        def _sql_has_dim_filter(sql: str, col: str, value: str) -> bool:
+            s = sql or ""
+            v = (value or "").strip()
+            if not v:
+                return False
+            v_re = re.escape(v)
+            # Accept a few common patterns (case-insensitive):
+            # - col = 'X'
+            # - LOWER(col) = LOWER('X')
+            # - col IN ('X', ...)
+            return bool(
+                re.search(rf"\b{re.escape(col)}\b\s*=\s*'{v_re}'\b", s, flags=re.IGNORECASE)
+                or re.search(rf"\blower\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+                or re.search(rf"\b{re.escape(col)}\b\s+in\s*\(\s*'{v_re}'\b", s, flags=re.IGNORECASE)
+            )
+
+        # Rebuild the user-visible list after any normalization.
+        parsed_filters["filters_list"] = [
+            f"{k}: {_display(f[k]['value'])}" for k in ["genre", "region", "target", "channel", "time_window"]
+        ] + default_notes
+        if touches_dead_hours_tables:
+            parsed_filters["filters_list"].append(
+                "dead_hours: included" if include_dead_hours else "dead_hours: excluded (default)"
+            )
 
         def _require_dead_hours_exclusion(sql: str):
             s = (sql or "").lower()
@@ -471,17 +550,24 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
             if (touches_time_band or touches_program) and not include_dead_hours:
                 _require_dead_hours_exclusion(sql)
 
-            if region.upper() == "ALL":
+            if _is_no_filter(region):
                 if re.search(r"\bregion\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
                     raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
-            if target.upper() == "ALL":
+            else:
+                if not _sql_has_dim_filter(sql, "region", region):
+                    raise RuntimeError(f"SQL is missing a region filter for FILTERS region={region}")
+
+            if _is_no_filter(target):
                 if re.search(r"\btarget\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
                     raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
+            else:
+                if not _sql_has_dim_filter(sql, "target", target):
+                    raise RuntimeError(f"SQL is missing a target filter for FILTERS target={target}")
 
         # Validate non-ALL values are in allowed rows (column-wise)
         for col in ("genre", "region", "target", "channel"):
             val = (f[col]["value"] or "").strip()
-            if val.upper() == "ALL":
+            if _is_no_filter(val):
                 continue
             if val.lower() not in allowed_by_col.get(col, set()):
                 raise RuntimeError(
@@ -493,7 +579,7 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
         r = (f["region"]["value"] or "").strip()
         t = (f["target"]["value"] or "").strip()
         c = (f["channel"]["value"] or "").strip()
-        if all(x and x.upper() != "ALL" for x in (g, r, t, c)):
+        if all(x and not _is_no_filter(x) for x in (g, r, t, c)):
             if not _tuple_exists(g, r, t, c):
                 suggestion = _suggest_tuple(g, r, t, c)
                 raise RuntimeError(
@@ -1370,6 +1456,7 @@ def index():
                     allowed_rows=allowed_rows,
                     candidates=candidates,
                     question=question,
+                    selected_default_dimensions=selected_default,
                 ),
                 validate_output_schema=validate_output_schema,
                 validate_metric_sql_binding=validate_metric_sql_binding,
@@ -1395,10 +1482,20 @@ def index():
                         return f.split(":", 1)[-1].strip()
                 return None
             
-            resolved_genre = _extract_dim(filters, "genre")
-            resolved_region = _extract_dim(filters, "region")
-            resolved_target = _extract_dim(filters, "target")
-            resolved_channel = _extract_dim(filters, "channel")
+            def _normalize_no_filter(v: str | None) -> str | None:
+                if not v:
+                    return None
+                vv = v.strip()
+                if vv in {"__NO_FILTER__", "(no filter)"}:
+                    return None
+                if vv.upper() == "ALL":
+                    return None
+                return vv
+
+            resolved_genre = _normalize_no_filter(_extract_dim(filters, "genre"))
+            resolved_region = _normalize_no_filter(_extract_dim(filters, "region"))
+            resolved_target = _normalize_no_filter(_extract_dim(filters, "target"))
+            resolved_channel = _normalize_no_filter(_extract_dim(filters, "channel"))
             
             shadow_dims = shadow_resolve_dimensions_bq(
                 bq_client=bq_client,
