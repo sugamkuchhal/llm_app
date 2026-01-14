@@ -5,7 +5,6 @@ import logging
 import hashlib
 import time
 import uuid
-import re
 
 from validators.answer_validator import validate_answer
 from validators.manifest_validator import validate_manifest
@@ -16,87 +15,11 @@ from domain.barc.barc_rules import has_dead_hours_filter
 logger = logging.getLogger("logger")
 
 
-DEAD_HOURS = ("00", "01", "02", "03", "04", "05")
-
-_INCLUDE_DEAD_HOURS_PATTERNS = (
-    r"\binclude\s+dead\s+hours\b",
-    r"\bincluding\s+dead\s+hours\b",
-    r"\bwith\s+dead\s+hours\b",
-    r"\bconsider\s+dead\s+hours\b",
-    r"\ball\s+hours\b",
-    r"\b24\s*x\s*7\b",
-    r"\b24\s*\/\s*7\b",
-    r"\b24x7\b",
-)
-
-_EXCLUDE_DEAD_HOURS_PATTERNS = (
-    r"\bexclude\s+dead\s+hours\b",
-    r"\bwithout\s+dead\s+hours\b",
-    r"\bremove\s+dead\s+hours\b",
-)
-
-
-def should_exclude_dead_hours(question: str | None) -> bool:
-    """
-    Domain rule: exclude dead hours by default unless the user explicitly asks
-    to include them.
-    """
-    t = (question or "").lower()
-
-    if any(re.search(p, t) for p in _EXCLUDE_DEAD_HOURS_PATTERNS):
-        return True
-
-    if any(re.search(p, t) for p in _INCLUDE_DEAD_HOURS_PATTERNS):
-        return False
-
-    # If user mentions dead hours without "include", default remains exclusion.
-    return True
-
-
-def _pick_time_band_half_hour_ref(sql: str) -> str:
-    """
-    Prefer a qualified reference (e.g. t.time_band_half_hour) if present.
-    """
-    m = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*time_band_half_hour\b", sql)
-    if m:
-        return f"{m.group(1)}.time_band_half_hour"
-    return "time_band_half_hour"
-
-
-def _has_dead_hours_predicate(sql: str) -> bool:
-    """
-    Best-effort detection of an existing dead-hours predicate, to avoid double injection.
-    """
-    s = sql.lower()
-    if "time_band_half_hour" not in s:
-        return False
-
-    # Covers common BigQuery forms: LEFT(col,2) [NOT] IN (...) / SUBSTR(col,1,2) [NOT] IN (...)
-    return bool(
-        re.search(r"\bleft\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*2\s*\)\s*(not\s+)?in\s*\(", s)
-        or re.search(r"\bsubstr\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*1\s*,\s*2\s*\)\s*(not\s+)?in\s*\(", s)
-        or re.search(r"\bsubstring\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*1\s*,\s*2\s*\)\s*(not\s+)?in\s*\(", s)
-    )
-
-
 def apply_dead_hours_filter(sql: str) -> str:
     """
-    Inject dead-hours exclusion into the OUTERMOST query only.
-
-    Notes:
-    - Applies only when the query references `time_band_half_hour`.
-    - Skips injection if a dead-hours predicate already exists.
-    - String-based injection is heuristic; prefer generating the predicate in SQL upstream.
+    Safely inject dead-hours filter into the OUTERMOST query only.
     """
-    if not re.search(r"\btime_band_half_hour\b", sql, flags=re.IGNORECASE):
-        return sql
-
-    if _has_dead_hours_predicate(sql):
-        return sql
-
-    col_ref = _pick_time_band_half_hour_ref(sql)
-    hours = ",".join([f"'{h}'" for h in DEAD_HOURS])
-    condition = f"LEFT({col_ref}, 2) NOT IN ({hours})"
+    condition = "hour NOT IN ('00','01','02','03','04','05')"
 
     sql_lower = sql.lower()
 
@@ -109,40 +32,23 @@ def apply_dead_hours_filter(sql: str) -> str:
     tail = sql[from_idx:]
     tail_lower = tail.lower()
 
-    clause_keywords = [" group by ", " order by ", " having ", " qualify ", " limit "]
-
-    where_rel = tail_lower.find(" where ")
-    if where_rel != -1:
-        # Insert AND <condition> before the next clause after WHERE (or end of SQL)
-        after_where_rel = where_rel + len(" where ")
-        after_where = tail_lower[after_where_rel:]
-
-        next_clause_rel = None
-        for kw in clause_keywords:
-            idx = after_where.find(kw)
-            if idx != -1 and (next_clause_rel is None or idx < next_clause_rel):
-                next_clause_rel = idx
-
-        if next_clause_rel is None:
-            insert_pos = len(sql)
-        else:
-            insert_pos = from_idx + after_where_rel + next_clause_rel
-
-        before = sql[:insert_pos].rstrip()
-        after = sql[insert_pos:].lstrip()
-        return f"{before}\n  AND {condition}\n{after}" if after else f"{before}\n  AND {condition}"
-
-    # No WHERE in the outermost query: insert WHERE <condition> before next clause (or end)
-    next_clause_rel = None
-    for kw in clause_keywords:
+    for kw in [" where ", " group by ", " order by ", " having ", " qualify "]:
         idx = tail_lower.find(kw)
-        if idx != -1 and (next_clause_rel is None or idx < next_clause_rel):
-            next_clause_rel = idx
+        if idx != -1:
+            insert_pos = from_idx + idx
+            break
+    else:
+        insert_pos = len(sql)
 
-    insert_pos = len(sql) if next_clause_rel is None else (from_idx + next_clause_rel)
-    before = sql[:insert_pos].rstrip()
-    after = sql[insert_pos:].lstrip()
-    return f"{before}\nWHERE {condition}\n{after}" if after else f"{before}\nWHERE {condition}"
+    head = sql[:insert_pos]
+    rest = sql[insert_pos:]
+
+    if " where " in head.lower():
+        head += f"\nAND {condition}"
+    else:
+        head += f"\nWHERE {condition}"
+
+    return head + rest
 
 
 
@@ -220,19 +126,7 @@ def run_analysis(
     validate_metric_sql_binding(metric_manifest, sql_blocks)
 
     # ---- Dead-hours enforcement (default ON) ----
-    # Domain rule: exclude dead hours unless the USER explicitly asks to include them.
-    # (We do NOT rely on the planner text for this decision.)
-    exclude_dead_hours = should_exclude_dead_hours(question)
-
-    # Keep logging of planner mention as observability only.
-    logger.info(
-        "dead_hours_policy | request_id=%s | exclude=%s | planner_mentions_dead_hours=%s",
-        request_id,
-        exclude_dead_hours,
-        has_dead_hours_filter(planner_text),
-    )
-
-    if exclude_dead_hours:
+    if not has_dead_hours_filter(planner_text):
         for q in sql_blocks:
             q["sql"] = apply_dead_hours_filter(q["sql"])
 
