@@ -1035,7 +1035,12 @@ def index():
                     "metadata": META_DATA,
                     "dimension_defaults": fetch_default_dimension_rows(
                         bq_client=bq_client,
-                        limit=int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100")),
+                        limit=(
+                            None
+                            if os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100").strip().lower()
+                            in {"infinite", "all", "none", "unlimited", "0", "-1"}
+                            else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
+                        ),
                     ),
                     "model": planner_model,
                 },
