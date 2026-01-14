@@ -28,6 +28,8 @@ from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
 from domain.barc.barc_dimension_reference import (
     fetch_default_dimension_rows,
+    fetch_candidate_dimension_rows_for_question,
+    merge_dimension_rows,
     pick_selected_default_row,
 )
 from llm.planner import call_planner
@@ -115,7 +117,7 @@ except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
 SYSTEM_PROMPT_HASH = "d02605672aa5a85fce67d63a429895bcc674e8bd9fdf64406ffff7211a8a470a"
-PLANNER_PROMPT_HASH = "fe77f15ccbbc0f99b8825b8ab5f027e372d90d92373f0c3c1ad240a510e70a14"
+PLANNER_PROMPT_HASH = "e3b4d0104dd188e770508d44562d10cde1686bca73de2128d75688d1ecf2b11b"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
 assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
@@ -1036,9 +1038,15 @@ def index():
                     else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
                 ),
             )
+            candidates = fetch_candidate_dimension_rows_for_question(
+                bq_client=bq_client,
+                question=question,
+                limit=int(os.getenv("DIMENSION_CANDIDATES_LIMIT", "200")),
+            )
+            allowed_rows = merge_dimension_rows(candidates, default_rows)
             selected_default = pick_selected_default_row(
                 question=question,
-                default_rows=default_rows,
+                default_rows=(candidates or default_rows),
             )
 
             result = run_analysis(
@@ -1050,7 +1058,7 @@ def index():
                     "system_prompt": SYSTEM_PROMPT,
                     "planner_prompt": PLANNER_PROMPT,
                     "metadata": META_DATA,
-                    "default_dimension_rows": default_rows,
+                    "allowed_dimension_rows": allowed_rows,
                     "selected_default_dimensions": selected_default,
                     "model": planner_model,
                 },

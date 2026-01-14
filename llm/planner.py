@@ -11,7 +11,7 @@ def call_planner(
     system_prompt,
     planner_prompt,
     metadata,
-    default_dimension_rows,
+    allowed_dimension_rows,
     selected_default_dimensions,
     model
 ):
@@ -28,8 +28,8 @@ CHAT HISTORY:
 METADATA:
 {metadata}
 
-DEFAULT_DIMENSION_ROWS (SYSTEM-PROVIDED; VALID VALUES):
-{json.dumps(default_dimension_rows, indent=2)}
+ALLOWED_DIMENSION_ROWS (SYSTEM-PROVIDED; YOU MUST CHOOSE FROM THESE):
+{json.dumps(allowed_dimension_rows, indent=2)}
 
 SELECTED_DEFAULT_DIMENSIONS (USE UNLESS USER OVERRIDES):
 {json.dumps(selected_default_dimensions, indent=2)}
