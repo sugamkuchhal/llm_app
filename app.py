@@ -208,7 +208,11 @@ def extract_metric_manifest(text: str):
 
 def validate_metric_sql_binding(metric_manifest, sql_blocks):
     """
-    Ensures metric ↔ SQL mapping is complete and consistent.
+    Ensures metric → SQL references are valid.
+
+    Deterministic policy: validate references only.
+    - Hard-fail if the manifest references SQL blocks that do not exist
+    - Do NOT fail if there are extra SQL blocks not referenced by the manifest
     """
     declared_sql_indices = set()
     for m in metric_manifest:
@@ -218,7 +222,6 @@ def validate_metric_sql_binding(metric_manifest, sql_blocks):
     extracted_sql_indices = {q["metric_index"] for q in sql_blocks}
 
     missing_sql = declared_sql_indices - extracted_sql_indices
-    unbound_sql = extracted_sql_indices - declared_sql_indices
 
     if missing_sql:
         logger.error(
@@ -229,17 +232,8 @@ def validate_metric_sql_binding(metric_manifest, sql_blocks):
             f"Metric manifest references missing SQL blocks: {sorted(missing_sql)}"
         )
 
-    if unbound_sql:
-        logger.error(
-            "SQL blocks not bound to any metric | unbound=%s",
-            sorted(unbound_sql)
-        )
-        raise RuntimeError(
-            f"SQL blocks not bound to any metric: {sorted(unbound_sql)}"
-        )
-
     logger.info(
-        "Metric ↔ SQL binding validated | metrics=%d | sql_blocks=%d",
+        "Metric → SQL references validated | metrics=%d | sql_blocks=%d",
         len(metric_manifest),
         len(sql_blocks)
     )
