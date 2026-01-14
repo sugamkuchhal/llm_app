@@ -1,4 +1,12 @@
 flask
-google-cloud-aiplatform
+gunicorn
 google-cloud-bigquery
+google-cloud-aiplatform
+vertexai
 jsonschema
+markdown
+pytest
+pandas
+numpy
+jinja2
+requests
