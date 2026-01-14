@@ -318,31 +318,51 @@ def validate_read_only_sql(sql: str, index: int):
         raise RuntimeError(f"Non read-only SQL in query #{index}")
 
 def extract_all_sql(text: str):
-    sql_blocks = []
-    i = 1
+    """
+    Extracts sequential SQL blocks.
 
-    while True:
+    Deterministic policy: fail fast on gaps/duplicates.
+    - If blocks exist, they must be numbered 1..N with no gaps and no duplicates.
+    - Each BEGIN_SQL_BLOCK_i must have a matching END_SQL_BLOCK_i.
+    """
+    begin_matches = re.findall(r"\bBEGIN_SQL_BLOCK_(\d+)\b", text)
+    if not begin_matches:
+        raise RuntimeError("No SQL blocks found")
+
+    indices = [int(x) for x in begin_matches]
+    if len(indices) != len(set(indices)):
+        raise RuntimeError(f"Duplicate SQL block numbers detected: {sorted(indices)}")
+
+    present = sorted(indices)
+    if present[0] != 1:
+        raise RuntimeError(f"SQL blocks must start at 1; found {present[0]}")
+
+    expected = list(range(1, present[-1] + 1))
+    if present != expected:
+        missing = sorted(set(expected) - set(present))
+        raise RuntimeError(
+            f"SQL block numbering must be sequential; missing blocks: {missing}"
+        )
+
+    sql_blocks = []
+    for i in expected:
         start = f"BEGIN_SQL_BLOCK_{i}"
         end = f"END_SQL_BLOCK_{i}"
 
-        if start not in text:
-            break
+        if text.count(start) != 1 or text.count(end) != 1:
+            raise RuntimeError(f"Invalid SQL block markers for block #{i}")
 
-        try:
-            block = text.split(start, 1)[1]
-            block = block.split(end, 1)[0].strip()
-            validate_read_only_sql(block, i)
-            sql_blocks.append({
-                "metric_index": i,
-                "sql": block
-            })
-        except Exception:
+        m = re.search(
+            rf"\b{re.escape(start)}\b\s*(.*?)\s*\b{re.escape(end)}\b",
+            text,
+            flags=re.DOTALL
+        )
+        if not m:
             raise RuntimeError(f"Invalid SQL block #{i}")
 
-        i += 1
-
-    if not sql_blocks:
-        raise RuntimeError("No SQL blocks found")
+        block = m.group(1).strip()
+        validate_read_only_sql(block, i)
+        sql_blocks.append({"metric_index": i, "sql": block})
 
     return sql_blocks
 
