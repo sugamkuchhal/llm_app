@@ -7,6 +7,9 @@ import markdown
 import hashlib
 import uuid
 import warnings
+import base64
+import datetime
+from decimal import Decimal
 
 warnings.filterwarnings(
     "ignore",
@@ -452,36 +455,97 @@ def strip_sql_comments(sql: str) -> str:
 # --------------------------------------------------
 # BigQuery execution
 # --------------------------------------------------
+def _bq_schema_to_json(schema) -> list[dict]:
+    """
+    Convert BigQuery SchemaField objects to JSON-serializable dicts.
+    """
+    if not schema:
+        return []
+    return [
+        {
+            "name": f.name,
+            "type": getattr(f, "field_type", None),
+            "mode": getattr(f, "mode", None),
+            "description": getattr(f, "description", None),
+        }
+        for f in schema
+    ]
+
+
+def _json_safe_value(v):
+    """
+    Convert common BigQuery value types to JSON-serializable primitives.
+    """
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, Decimal):
+        # Deterministic numeric representation for JSON encoding.
+        return float(v)
+    if isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
+        return v.isoformat()
+    if isinstance(v, bytes):
+        return base64.b64encode(v).decode("ascii")
+    if isinstance(v, dict):
+        return {k: _json_safe_value(val) for k, val in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_json_safe_value(x) for x in v]
+    return str(v)
+
+
+def _normalize_bq_rows(rows: list[dict]) -> list[dict]:
+    """
+    Ensure rows are safe for JSON serialization and stable downstream handling.
+    """
+    return [{k: _json_safe_value(v) for k, v in r.items()} for r in rows]
+
+
 def run_all_bigquery(queries):
     results = []
 
     for q in queries:
-        dry_cfg = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
-        dry_job = bq_client.query(q["sql"], job_config=dry_cfg, location=BQ_REGION)
-
-        # BigQuery-enforced check: only SELECT statements are allowed.
-        stmt_type = getattr(dry_job, "statement_type", None)
-        if stmt_type is not None and stmt_type.upper() != "SELECT":
-            raise RuntimeError(
-                f"Query #{q['metric_index']} is not read-only (statement_type={stmt_type})"
+        metric_index = q.get("metric_index")
+        sql = q.get("sql", "")
+        try:
+            dry_cfg = bigquery.QueryJobConfig(
+                dry_run=True,
+                use_query_cache=False,
+                maximum_bytes_billed=MAX_BQ_BYTES,
             )
+            dry_job = bq_client.query(sql, job_config=dry_cfg, location=BQ_REGION)
 
-        if dry_job.total_bytes_processed > MAX_BQ_BYTES:
-            raise RuntimeError(
-                f"Query #{q['metric_index']} exceeds byte limit "
-                f"({dry_job.total_bytes_processed} > {MAX_BQ_BYTES})"
+            # BigQuery-enforced check: only SELECT statements are allowed.
+            stmt_type = getattr(dry_job, "statement_type", None)
+            if stmt_type is not None and stmt_type.upper() != "SELECT":
+                raise RuntimeError(
+                    f"Query #{metric_index} is not read-only (statement_type={stmt_type})"
+                )
+
+            if dry_job.total_bytes_processed > MAX_BQ_BYTES:
+                raise RuntimeError(
+                    f"Query #{metric_index} exceeds byte limit "
+                    f"({dry_job.total_bytes_processed} > {MAX_BQ_BYTES})"
+                )
+
+            exec_cfg = bigquery.QueryJobConfig(
+                use_query_cache=False,
+                maximum_bytes_billed=MAX_BQ_BYTES,
             )
+            job = bq_client.query(sql, job_config=exec_cfg, location=BQ_REGION)
+            rows = [dict(row) for row in job.result(max_results=MAX_ROWS)]
+            rows = _normalize_bq_rows(rows)
+            schema = _bq_schema_to_json(job.schema)
 
-        job = bq_client.query(q["sql"], location=BQ_REGION)
-        rows = [dict(row) for row in job.result(max_results=MAX_ROWS)]
-        schema = job.schema
-
-        results.append({
-            "metric_index": q["metric_index"],
-            "sql": q["sql"],
-            "rows": rows,
-            "schema": schema
-        })
+            results.append({
+                "metric_index": metric_index,
+                "sql": sql,
+                "rows": rows,
+                "schema": schema
+            })
+        except Exception as e:
+            logger.exception("BigQuery execution failed | metric_index=%s", metric_index)
+            raise RuntimeError(
+                f"BigQuery execution failed for query #{metric_index}: {e}"
+            ) from e
 
     return results
 
