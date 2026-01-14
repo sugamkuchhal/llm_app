@@ -279,14 +279,34 @@ SQL_READ_ONLY_RE = re.compile(
 
 FORBIDDEN_SQL = re.compile(
     r"\b("
-    r"insert|update|delete|merge|create|drop|alter|truncate|"
-    r"grant|revoke|call|execute"
+    # DDL/DML
+    r"insert|update|delete|merge|create|drop|alter|truncate|replace|rename|"
+    # Privilege / procedure
+    r"grant|revoke|call|"
+    # BigQuery scripting / dynamic SQL (not allowed in read-only flow)
+    r"begin|end|declare|set|commit|rollback|execute\s+immediate|execute"
     r")\b",
     re.IGNORECASE
 )
 
 def validate_read_only_sql(sql: str, index: int):
-    clean_sql = strip_sql_comments(sql)
+    """
+    Strict read-only validation:
+    - Single statement only (no internal semicolons)
+    - Must start with SELECT/WITH (after stripping comments)
+    - Must not contain DDL/DML/scripting keywords
+    """
+    clean_sql = strip_sql_comments(sql).strip()
+
+    # Allow a single trailing semicolon, disallow any internal semicolons.
+    if clean_sql.endswith(";"):
+        clean_sql = clean_sql[:-1].rstrip()
+    if ";" in clean_sql:
+        raise RuntimeError(f"Multiple statements are not allowed (query #{index})")
+
+    if not SQL_READ_ONLY_RE.match(clean_sql):
+        raise RuntimeError(f"SQL must start with SELECT/WITH (query #{index})")
+
     match = FORBIDDEN_SQL.search(clean_sql)
     if match:
         logger.warning(
@@ -343,6 +363,13 @@ def run_all_bigquery(queries):
     for q in queries:
         dry_cfg = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
         dry_job = bq_client.query(q["sql"], job_config=dry_cfg, location=BQ_REGION)
+
+        # BigQuery-enforced check: only SELECT statements are allowed.
+        stmt_type = getattr(dry_job, "statement_type", None)
+        if stmt_type is not None and stmt_type.upper() != "SELECT":
+            raise RuntimeError(
+                f"Query #{q['metric_index']} is not read-only (statement_type={stmt_type})"
+            )
 
         if dry_job.total_bytes_processed > MAX_BQ_BYTES:
             raise RuntimeError(
