@@ -64,11 +64,280 @@ def infer_unit(field_name):
         return "thousands"
     return "number"
 
-def build_bq_style_chart(rows, schema):
+def _infer_unit_from_field_info(field: dict) -> str:
+    name = (field.get("name") or "")
+    tags = field.get("semantic_tags") or []
+    if isinstance(tags, list) and any(isinstance(t, str) and "percent" in t.lower() for t in tags):
+        return "percent"
+    return infer_unit(name)
+
+
+def _vega_type_for_field(field: dict, *, for_axis: bool = False) -> str:
+    """
+    Vega-Lite encoding type: nominal|ordinal|quantitative|temporal
+    """
+    role = field.get("role")
+    bq_type = (field.get("bq_type") or "").upper()
+    dimension_type = field.get("dimension_type")
+
+    if role == "kpi":
+        return "quantitative"
+
+    if dimension_type == "time":
+        # Only use temporal when the underlying type is truly date/time;
+        # many "time" concepts (e.g., week_id) are strings/ints and should remain ordinal.
+        if bq_type in ("DATE", "DATETIME", "TIMESTAMP", "TIME"):
+            return "temporal"
+        return "ordinal"
+
+    # categorical dimension
+    return "nominal"
+
+
+def _title_for_field(field: dict) -> str:
+    # Keep titles compact; descriptions may be long.
+    return field.get("name") or ""
+
+
+def _tooltip_fields(dim_fields: list[dict], kpi_fields: list[dict]) -> list[dict]:
+    out = []
+    for f in dim_fields + kpi_fields:
+        out.append(
+            {
+                "field": f.get("name"),
+                "type": _vega_type_for_field(f),
+                "title": _title_for_field(f),
+            }
+        )
+    return out
+
+
+def build_bq_style_chart(rows, schema, *, field_info=None, domain_meta=None, top_n: int = 20):
     if not rows:
         return None
 
-    # 🔧 NEW: infer schema if missing
+    # If field_info is provided (authoritative), use it for roles/types.
+    if field_info:
+        dim_fields = [f for f in field_info if isinstance(f, dict) and f.get("role") == "dimension"]
+        kpi_fields = [f for f in field_info if isinstance(f, dict) and f.get("role") == "kpi"]
+
+        # Pick best time dimension (most granular) if possible.
+        time_order = []
+        if domain_meta:
+            time_order = (
+                (domain_meta.get("global", {}) or {})
+                .get("time_hierarchy", {})
+                .get("ordering", [])
+            ) or []
+        rank = {lvl: i for i, lvl in enumerate(time_order)} if isinstance(time_order, list) else {}
+
+        time_dims = [f for f in dim_fields if f.get("dimension_type") == "time"]
+        cat_dims = [f for f in dim_fields if f.get("dimension_type") != "time"]
+        time_dims_sorted = sorted(
+            time_dims,
+            key=lambda f: rank.get(f.get("time_level"), -1),
+        )
+
+        # Prefer most granular time dim (highest rank).
+        time_dim = time_dims_sorted[-1] if time_dims_sorted else None
+
+        # Deterministic dimension selection:
+        # - if time exists: x=time, color=first categorical dim (optional)
+        # - else: x=first categorical dim, color=second categorical dim (optional)
+        if time_dim:
+            dim_x = time_dim
+            dim_color = cat_dims[0] if cat_dims else None
+            chart_kind = "line"
+        else:
+            dim_x = cat_dims[0] if cat_dims else None
+            dim_color = cat_dims[1] if len(cat_dims) > 1 else None
+            chart_kind = "bar"
+
+        if not kpi_fields:
+            return {
+                "type": "vega",
+                "spec": {
+                    "data": {"values": rows[:5]},
+                    "mark": "text",
+                    "encoding": {"text": {"value": "No KPI fields to chart"}},
+                },
+            }
+
+        # Guardrail: too many dimensions to chart cleanly.
+        dim_count = len(dim_fields)
+        if time_dim and dim_count > (1 + (1 if dim_color else 0)):
+            return {
+                "type": "vega",
+                "spec": {
+                    "data": {"values": rows[:5]},
+                    "mark": "text",
+                    "encoding": {"text": {"value": "Too many dimensions for time series chart"}},
+                },
+            }
+        if (not time_dim) and dim_count > (1 + (1 if dim_color else 0)):
+            return {
+                "type": "vega",
+                "spec": {
+                    "data": {"values": rows[:5]},
+                    "mark": "text",
+                    "encoding": {"text": {"value": "Too many dimensions for bar chart"}},
+                },
+            }
+
+        # Create visuals
+        tooltip = _tooltip_fields([x for x in [dim_x, dim_color] if x], kpi_fields)
+
+        visuals = []
+
+        # Special case: 1 categorical dimension + exactly 2 KPIs
+        # If same unit -> grouped bars (fold), else dual-axis.
+        if (not time_dim) and dim_x and len(kpi_fields) == 2 and not dim_color:
+            f1, f2 = kpi_fields
+            u1, u2 = _infer_unit_from_field_info(f1), _infer_unit_from_field_info(f2)
+
+            if u1 == u2:
+                visuals.append(
+                    {
+                        "type": "vega",
+                        "spec": {
+                            "data": {"values": rows},
+                            "transform": [
+                                {"fold": [f1["name"], f2["name"]], "as": ["metric", "value"]},
+                                {"window": [{"op": "rank", "as": "_rank"}], "sort": [{"field": "value", "order": "descending"}]},
+                                {"filter": f"datum._rank <= {int(top_n)}"},
+                            ],
+                            "mark": "bar",
+                            "encoding": {
+                                "x": {
+                                    "field": dim_x["name"],
+                                    "type": _vega_type_for_field(dim_x, for_axis=True),
+                                    "axis": {"title": _title_for_field(dim_x)},
+                                    "sort": {"field": "value", "order": "descending"},
+                                },
+                                "y": {"field": "value", "type": "quantitative", "axis": {"title": "Value"}},
+                                "color": {"field": "metric", "type": "nominal", "legend": {"title": "Metric"}},
+                                "tooltip": tooltip,
+                            },
+                        },
+                    }
+                )
+                return visuals
+
+            visuals.append(
+                {
+                    "type": "vega",
+                    "spec": {
+                        "data": {"values": rows},
+                        "resolve": {"scale": {"y": "independent"}},
+                        "layer": [
+                            {
+                                "mark": "bar",
+                                "encoding": {
+                                    "x": {
+                                        "field": dim_x["name"],
+                                        "type": _vega_type_for_field(dim_x, for_axis=True),
+                                        "axis": {"title": _title_for_field(dim_x)},
+                                    },
+                                    "y": {"field": f1["name"], "type": "quantitative", "axis": {"title": f1["name"]}},
+                                    "color": {"value": "#4c78a8"},
+                                    "tooltip": tooltip,
+                                },
+                            },
+                            {
+                                "mark": "bar",
+                                "encoding": {
+                                    "x": {
+                                        "field": dim_x["name"],
+                                        "type": _vega_type_for_field(dim_x, for_axis=True),
+                                        "axis": {"title": _title_for_field(dim_x)},
+                                    },
+                                    "y": {
+                                        "field": f2["name"],
+                                        "type": "quantitative",
+                                        "axis": {"title": f2["name"], "orient": "right"},
+                                    },
+                                    "color": {"value": "#f58518"},
+                                    "tooltip": tooltip,
+                                },
+                            },
+                        ],
+                    },
+                }
+            )
+            return visuals
+
+        for kpi in kpi_fields:
+            if time_dim and dim_x:
+                spec = {
+                    "data": {"values": rows},
+                    "mark": "line",
+                    "encoding": {
+                        "x": {
+                            "field": dim_x["name"],
+                            "type": _vega_type_for_field(dim_x, for_axis=True),
+                            "axis": {"title": _title_for_field(dim_x)},
+                        },
+                        "y": {
+                            "field": kpi["name"],
+                            "type": "quantitative",
+                            "axis": {"title": _title_for_field(kpi)},
+                        },
+                        "tooltip": tooltip,
+                    },
+                }
+                if dim_color:
+                    spec["encoding"]["color"] = {
+                        "field": dim_color["name"],
+                        "type": _vega_type_for_field(dim_color),
+                        "legend": {"title": _title_for_field(dim_color)},
+                    }
+                visuals.append({"type": "vega", "spec": spec})
+            elif dim_x:
+                visuals.append(
+                    {
+                        "type": "vega",
+                        "spec": {
+                            "data": {"values": rows},
+                            "transform": [
+                                {"window": [{"op": "rank", "as": "_rank"}], "sort": [{"field": kpi["name"], "order": "descending"}]},
+                                {"filter": f"datum._rank <= {int(top_n)}"},
+                            ],
+                            "mark": "bar",
+                            "encoding": {
+                                "x": {
+                                    "field": dim_x["name"],
+                                    "type": _vega_type_for_field(dim_x, for_axis=True),
+                                    "axis": {"title": _title_for_field(dim_x)},
+                                    "sort": {"field": kpi["name"], "order": "descending"},
+                                },
+                                "y": {
+                                    "field": kpi["name"],
+                                    "type": "quantitative",
+                                    "axis": {"title": _title_for_field(kpi)},
+                                },
+                                "tooltip": tooltip,
+                            },
+                        },
+                    }
+                )
+            else:
+                # No dimensions: show KPI as a simple text fallback.
+                visuals.append(
+                    {
+                        "type": "vega",
+                        "spec": {
+                            "data": {"values": rows[:1] if rows else [{}]},
+                            "mark": "text",
+                            "encoding": {"text": {"value": f"{kpi.get('name')}: {rows[0].get(kpi.get('name')) if rows else ''}"}},
+                        },
+                    }
+                )
+
+        return visuals
+
+    # Fallback: existing heuristic behavior (schema-based) for callers not providing field_info.
+
+    # 🔧 infer schema if missing
     if not schema:
         schema = infer_schema_from_rows(rows)
 

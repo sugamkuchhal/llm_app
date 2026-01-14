@@ -25,7 +25,7 @@ from vertexai.preview.generative_models import GenerativeModel
 from validators.answer_validator import validate_answer
 from charts.builder import build_bq_style_chart
 from pipeline.analysis_runner import run_analysis
-from ui.answer_adapter import build_ui_answer
+from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
