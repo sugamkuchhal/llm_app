@@ -23,10 +23,16 @@ from flask import Flask, request, render_template_string, session
 from google.cloud import bigquery
 from vertexai.preview.generative_models import GenerativeModel
 from validators.answer_validator import validate_answer
-from charts.builder import build_bq_style_chart
 from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
+from domain.barc.barc_mappings import resolve_genre
+from domain.barc.barc_dimension_reference import (
+    fetch_default_dimension_rows,
+    fetch_candidate_dimension_rows_for_question,
+    merge_dimension_rows,
+    pick_selected_default_row,
+)
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
 from config.prompt_guard import assert_prompt_unchanged, hash_text
@@ -57,8 +63,8 @@ SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
 MAX_TURNS = int(os.getenv("MAX_TURNS", 10))
 
 MAX_BQ_BYTES = int(
-    os.getenv("MAX_BQ_BYTES", 10 * 1024 * 1024 * 1024)
-)  # default: 10 GB
+    os.getenv("MAX_BQ_BYTES", 200 * 1024 * 1024 * 1024)
+)  # default: 200 GB
 
 MAX_ROWS = int(os.getenv("MAX_ROWS", 50000))
 
@@ -103,9 +109,7 @@ SYSTEM_PROMPT = load_file("prompt_system.txt")
 INTERPRETER_PROMPT = load_file("prompt_interpreter.txt")
 ANSWER_CONTRACT = load_file("contract_answer.json")
 
-ALL_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_all.json")
 PLANNER_PROMPT = load_file(f"domain/{DOMAIN}/{DOMAIN}_context_planner.txt")
-DEFAULT_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_default.json")
 META_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_meta.json")
 
 try:
@@ -114,7 +118,7 @@ except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
 SYSTEM_PROMPT_HASH = "d02605672aa5a85fce67d63a429895bcc674e8bd9fdf64406ffff7211a8a470a"
-PLANNER_PROMPT_HASH = "ac3fa1ea279e9f3633984c60f1c464ba54b24d36088182d60b2151ab43ff2497"
+PLANNER_PROMPT_HASH = "e3b4d0104dd188e770508d44562d10cde1686bca73de2128d75688d1ecf2b11b"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
 assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
@@ -202,6 +206,305 @@ def extract_metric_manifest(text: str):
         raise RuntimeError(
             f"Invalid METRIC_MANIFEST JSON at pos={e.pos}: {e.msg} | context='{context}'"
         ) from e
+
+
+def extract_filters(planner_text: str) -> dict:
+    """
+    Extract and parse the mandatory BEGIN_FILTERS/END_FILTERS block.
+    """
+    begin = "BEGIN_FILTERS"
+    end = "END_FILTERS"
+    if planner_text.count(begin) != 1 or planner_text.count(end) != 1:
+        raise RuntimeError("Planner must return exactly one FILTERS block")
+
+    b = planner_text.find(begin)
+    e = planner_text.find(end)
+    if b == -1 or e == -1 or e <= b:
+        raise RuntimeError("Invalid FILTERS marker ordering")
+
+    block = planner_text[b + len(begin):e].strip()
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+
+    parsed: dict[str, dict] = {}
+    for ln in lines:
+        if not ln.startswith("-"):
+            continue
+        body = ln.lstrip("-").strip()
+        if ":" not in body:
+            continue
+        key, rest = body.split(":", 1)
+        key = key.strip().lower()
+        parts = [p.strip() for p in rest.split(":") if p.strip()]
+        value = parts[-1] if parts else ""
+        parsed[key] = {"raw": ln, "value": value}
+
+    required = ["genre", "region", "target", "channel", "time_window"]
+    missing = [k for k in required if k not in parsed]
+    if missing:
+        raise RuntimeError(f"FILTERS block missing required keys: {missing}")
+
+    filters_list = [f"{k}: {parsed[k]['value']}" for k in required]
+    return {"filters": parsed, "filters_list": filters_list}
+
+
+def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], question: str):
+    """
+    Create a validator closure that enforces:
+    - region/target must be ALL unless user specified them in the question (best-effort)
+    - chosen dimension values must exist in allowed_rows (column-wise)
+    - if all 4 dims are specified (non-ALL), the tuple must exist in allowed_rows
+    - SQL must not contain region/target equality filters when FILTERS says ALL
+    """
+    q = (question or "").lower()
+
+    def _contains_any(values: set[str]) -> bool:
+        for v in values:
+            if v and v.lower() in q:
+                return True
+        return False
+
+    # Best-effort "user specified" detection using bounded candidate rows.
+    cand_regions = {str(r.get("region", "")).strip() for r in (candidates or []) if r.get("region")}
+    cand_targets = {str(r.get("target", "")).strip() for r in (candidates or []) if r.get("target")}
+
+    user_specified_region = _contains_any(cand_regions)
+    user_specified_target = _contains_any(cand_targets)
+
+    # Allowed values by column (derived from allowed rows)
+    allowed_by_col: dict[str, set[str]] = {"genre": set(), "region": set(), "target": set(), "channel": set()}
+    for r in allowed_rows or []:
+        if not isinstance(r, dict):
+            continue
+        for k in allowed_by_col.keys():
+            v = r.get(k)
+            if isinstance(v, str) and v.strip():
+                allowed_by_col[k].add(v.strip().lower())
+
+    def _suggest(col: str, value: str) -> list[str]:
+        v = (value or "").strip().lower()
+        if not v:
+            return []
+        opts = sorted(allowed_by_col.get(col, set()))
+        # Prefer substring matches, else show first few options.
+        hits = [o for o in opts if v in o or o in v]
+        return hits[:8] if hits else opts[:8]
+
+    def _tuple_exists(g: str, r: str, t: str, c: str) -> bool:
+        key = (g.lower(), r.lower(), t.lower(), c.lower())
+        for row in allowed_rows or []:
+            if not isinstance(row, dict):
+                continue
+            rk = (
+                (row.get("genre") or "").strip().lower(),
+                (row.get("region") or "").strip().lower(),
+                (row.get("target") or "").strip().lower(),
+                (row.get("channel") or "").strip().lower(),
+            )
+            if rk == key:
+                return True
+        return False
+
+    def _suggest_tuple(g: str, r: str, t: str, c: str) -> dict | None:
+        want = {
+            "genre": g.lower(),
+            "region": r.lower(),
+            "target": t.lower(),
+            "channel": c.lower(),
+        }
+        best = None  # (score, tie, row)
+        for row in allowed_rows or []:
+            if not isinstance(row, dict):
+                continue
+            score = 0
+            for k in ("genre", "region", "target", "channel"):
+                rv = (row.get(k) or "").strip().lower()
+                if rv and rv == want[k]:
+                    score += 1
+            tie = (
+                (row.get("genre") or ""),
+                (row.get("region") or ""),
+                (row.get("target") or ""),
+                (row.get("channel") or ""),
+            )
+            if best is None or score > best[0] or (score == best[0] and tie < best[1]):
+                best = (score, tie, row)
+        return best[2] if best else None
+
+    def validate_filters_impl(*, parsed_filters: dict, sql_blocks: list[dict], question: str, planner_text: str):
+        f = parsed_filters["filters"]
+        region = (f["region"]["value"] or "").strip()
+        target = (f["target"]["value"] or "").strip()
+        time_window = (f["time_window"]["value"] or "").strip()
+
+        qtext = (question or "").lower()
+
+        def _user_specified_time_window(text: str) -> bool:
+            t = (text or "").lower()
+            # If user mentions a time window/date range, treat as specified.
+            return bool(
+                re.search(r"\b(last|latest|past)\s+\d+\s+(day|days|week|weeks)\b", t)
+                or re.search(r"\b(\d{4}-\d{2}-\d{2})\b", t)
+                or re.search(r"\bbetween\b.*\band\b", t)
+                or re.search(r"\bfrom\b.*\bto\b", t)
+                or re.search(r"\bweek_id\b|\bweek\s+\d+\b", t)
+            )
+
+        user_specified_time = _user_specified_time_window(qtext)
+
+        # If no time is specified by the user, time_window must default to last 4 weeks.
+        if not user_specified_time:
+            if not re.search(r"\b4\b.*\bweek", time_window.lower()):
+                raise RuntimeError("Time Window must default to Last 4 Weeks when user does not specify a time window")
+
+        # Dead-hours: exclude by default for time_band/program unless user explicitly includes.
+        include_dead_hours = bool(
+            re.search(r"\b(include|including|with)\s+dead\s+hours\b", qtext)
+            or re.search(r"\ball\s+hours\b|\b24x7\b|\b24\s*/\s*7\b", qtext)
+        )
+
+        # Enforce "do not query region/target unless specified"
+        if not user_specified_region and region.upper() != "ALL":
+            raise RuntimeError("Region must be ALL unless the user specifies a region")
+        if user_specified_region and region.upper() == "ALL":
+            raise RuntimeError("User specified a region, but FILTERS sets region=ALL")
+
+        if not user_specified_target and target.upper() != "ALL":
+            raise RuntimeError("Target must be ALL unless the user specifies a target")
+        if user_specified_target and target.upper() == "ALL":
+            raise RuntimeError("User specified a target, but FILTERS sets target=ALL")
+
+        def _sql_touches(sql: str, table: str) -> bool:
+            s = (sql or "").lower()
+            # handle backticks and optional project prefix
+            return f"barc_slm_poc.{table}".lower() in s
+
+        def _require_dead_hours_exclusion(sql: str):
+            s = (sql or "").lower()
+            # Accept common forms.
+            ok = bool(
+                re.search(r"left\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*2\s*\)\s*not\s+in\s*\(", s)
+                or re.search(r"substr\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*1\s*,\s*2\s*\)\s*not\s+in\s*\(", s)
+            )
+            if not ok:
+                raise RuntimeError(
+                    "Missing dead-hours exclusion for time_band/program tables. "
+                    "Expected predicate like LEFT(time_band_half_hour, 2) NOT IN ('00','01','02','03','04','05')."
+                )
+
+        def _require_last_n_weeks_week_id(sql: str, n: int):
+            s = (sql or "").lower()
+            # Common pattern: LatestWeeks CTE selecting distinct week_id order by desc limit N
+            pat = rf"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+{n}\b"
+            if not re.search(pat, s):
+                raise RuntimeError(
+                    f"Missing 'latest {n} weeks' filter for channel_table (week_id). "
+                    f"Expected pattern selecting DISTINCT week_id ORDER BY week_id DESC LIMIT {n}."
+                )
+
+        def _require_last_n_weeks_date(sql: str, date_col: str, n: int):
+            s = (sql or "").lower()
+            # Accept either INTERVAL n WEEK or INTERVAL (n*7) DAY
+            days = n * 7
+            ok = bool(
+                re.search(rf"\b{re.escape(date_col.lower())}\b\s*>=\s*date_sub\(\s*current_date\(\)\s*,\s*interval\s*{n}\s*week\s*\)", s)
+                or re.search(rf"\b{re.escape(date_col.lower())}\b\s*>=\s*date_sub\(\s*current_date\(\)\s*,\s*interval\s*{days}\s*day\s*\)", s)
+            )
+            if not ok:
+                raise RuntimeError(
+                    f"Missing 'last {n} weeks' date filter on {date_col}. "
+                    f"Expected {date_col} >= DATE_SUB(CURRENT_DATE(), INTERVAL {n} WEEK) (or {days} DAY)."
+                )
+
+        def _require_some_date_filter(sql: str, date_col: str):
+            s = (sql or "").lower()
+            # Basic requirement: the date column is used with a comparison operator
+            ok = bool(re.search(rf"\b{re.escape(date_col.lower())}\b\s*(>=|>|between|in)\b", s))
+            if not ok:
+                raise RuntimeError(
+                    f"Missing date filter on {date_col} for an explicit user time window request."
+                )
+
+        # Parse time_window value best-effort for enforcement.
+        tw = time_window.lower()
+        m_weeks = re.search(r"\b(\d+)\s*week", tw)
+        n_weeks = int(m_weeks.group(1)) if m_weeks else None
+
+        # SQL must not include region/target filters if FILTERS says ALL
+        for qb in sql_blocks or []:
+            sql = qb.get("sql", "") or ""
+            # Domain-specific time filters and dead-hours rules (BARC tables only)
+            touches_channel = _sql_touches(sql, "channel_table")
+            touches_time_band = _sql_touches(sql, "time_band_table")
+            touches_program = _sql_touches(sql, "program_table")
+
+            # Enforce last 4 weeks by default when user didn't specify.
+            if not user_specified_time:
+                # channel_table: use week_id latest 4
+                if touches_channel:
+                    _require_last_n_weeks_week_id(sql, 4)
+                # time_band/program: use date columns last 4 weeks
+                if touches_time_band:
+                    _require_last_n_weeks_date(sql, "time_band_date", 4)
+                if touches_program:
+                    _require_last_n_weeks_date(sql, "program_date", 4)
+            else:
+                # If user specified a time window, enforce something consistent.
+                if n_weeks is not None:
+                    if touches_channel:
+                        _require_last_n_weeks_week_id(sql, n_weeks)
+                    if touches_time_band:
+                        _require_last_n_weeks_date(sql, "time_band_date", n_weeks)
+                    if touches_program:
+                        _require_last_n_weeks_date(sql, "program_date", n_weeks)
+                else:
+                    # Unknown explicit window: require some filter on the correct date columns.
+                    if touches_time_band:
+                        _require_some_date_filter(sql, "time_band_date")
+                    if touches_program:
+                        _require_some_date_filter(sql, "program_date")
+                    if touches_channel:
+                        # Require any mention of week_id with a limiting pattern.
+                        if "week_id" not in sql.lower():
+                            raise RuntimeError("Missing week_id-based time filter for channel_table with explicit time request")
+
+            # Dead hours exclusion for time_band/program unless explicitly included
+            if (touches_time_band or touches_program) and not include_dead_hours:
+                _require_dead_hours_exclusion(sql)
+
+            if region.upper() == "ALL":
+                if re.search(r"\bregion\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
+                    raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
+            if target.upper() == "ALL":
+                if re.search(r"\btarget\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
+                    raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
+
+        # Validate non-ALL values are in allowed rows (column-wise)
+        for col in ("genre", "region", "target", "channel"):
+            val = (f[col]["value"] or "").strip()
+            if val.upper() == "ALL":
+                continue
+            if val.lower() not in allowed_by_col.get(col, set()):
+                raise RuntimeError(
+                    f"FILTERS {col} value not allowed: '{val}'. Suggestions: {_suggest(col, val)}"
+                )
+
+        # If all 4 dims are specified, validate full tuple exists
+        g = (f["genre"]["value"] or "").strip()
+        r = (f["region"]["value"] or "").strip()
+        t = (f["target"]["value"] or "").strip()
+        c = (f["channel"]["value"] or "").strip()
+        if all(x and x.upper() != "ALL" for x in (g, r, t, c)):
+            if not _tuple_exists(g, r, t, c):
+                suggestion = _suggest_tuple(g, r, t, c)
+                raise RuntimeError(
+                    f"FILTERS tuple not found in allowed dimension rows. "
+                    f"Provided={{genre:{g},region:{r},target:{t},channel:{c}}}. "
+                    f"Suggested={suggestion}"
+                )
+
+        return True
+
+    return validate_filters_impl
 
 def validate_metric_sql_binding(metric_manifest, sql_blocks):
     """
@@ -690,60 +993,6 @@ DOMAIN_COLUMN_INDEX = _build_domain_column_index(DOMAIN_META)
 DOMAIN_TIME_INDEX = _build_time_column_index(DOMAIN_META)
 
 
-def annotate_output_fields(*, field_names: list[str], schema: list[dict], domain_meta: dict) -> list[dict]:
-    """
-    Label output fields using domain metadata.
-
-    Output shape (per field):
-    - name
-    - bq_type
-    - role: dimension|kpi|unknown
-    - dimension_type: time|categorical|None
-    - time_level: year|week|date|half_hour|program_airing|None
-    - semantic_tags (if known)
-    - business_description (if known)
-    """
-    schema_by_name = {f.get("name"): f for f in (schema or []) if isinstance(f, dict)}
-
-    annotated: list[dict] = []
-    for name in field_names:
-        # Prefer exact schema entry; fall back to case-insensitive search.
-        schema_entry = schema_by_name.get(name)
-        if schema_entry is None:
-            schema_entry = next(
-                (v for k, v in schema_by_name.items() if isinstance(k, str) and k.lower() == name.lower()),
-                None,
-            )
-
-        candidates = DOMAIN_COLUMN_INDEX.get(name.lower(), [])
-        role = "unknown"
-        if any(c.get("role") == "kpi" for c in candidates):
-            role = "kpi"
-        elif any(c.get("role") == "dimension" for c in candidates):
-            role = "dimension"
-
-        time_level = DOMAIN_TIME_INDEX.get(name.lower())
-        dimension_type = None
-        if role == "dimension":
-            dimension_type = "time" if time_level else "categorical"
-
-        best = candidates[0] if candidates else {}
-
-        annotated.append(
-            {
-                "name": name,
-                "bq_type": (schema_entry or {}).get("type"),
-                "role": role,
-                "dimension_type": dimension_type,
-                "time_level": time_level,
-                "semantic_tags": best.get("semantic_tags", []),
-                "business_description": best.get("business_description"),
-            }
-        )
-
-    return annotated
-
-
 def _bq_schema_to_json(schema) -> list[dict]:
     """
     Convert BigQuery SchemaField objects to JSON-serializable dicts.
@@ -1080,6 +1329,26 @@ def index():
         try:
             question = request.form["question"]  # ✅ FIX
 
+            default_rows = fetch_default_dimension_rows(
+                bq_client=bq_client,
+                limit=(
+                    None
+                    if os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100").strip().lower()
+                    in {"infinite", "all", "none", "unlimited", "0", "-1"}
+                    else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
+                ),
+            )
+            candidates = fetch_candidate_dimension_rows_for_question(
+                bq_client=bq_client,
+                question=question,
+                limit=int(os.getenv("DIMENSION_CANDIDATES_LIMIT", "200")),
+            )
+            allowed_rows = merge_dimension_rows(candidates, default_rows)
+            selected_default = pick_selected_default_row(
+                question=question,
+                default_rows=(candidates or default_rows),
+            )
+
             result = run_analysis(
                 question=question,
                 session=session,
@@ -1089,13 +1358,19 @@ def index():
                     "system_prompt": SYSTEM_PROMPT,
                     "planner_prompt": PLANNER_PROMPT,
                     "metadata": META_DATA,
-                    "default_data": DEFAULT_DATA,
-                    "all_data": ALL_DATA,
+                    "allowed_dimension_rows": allowed_rows,
+                    "selected_default_dimensions": selected_default,
                     "model": planner_model,
                 },
                 extract_metric_manifest=extract_metric_manifest,
                 extract_all_sql=extract_all_sql,
                 extract_all_output_schema=extract_all_output_schema,
+                extract_filters=extract_filters,
+                validate_filters=make_validate_filters(
+                    allowed_rows=allowed_rows,
+                    candidates=candidates,
+                    question=question,
+                ),
                 validate_output_schema=validate_output_schema,
                 validate_metric_sql_binding=validate_metric_sql_binding,
                 run_all_bigquery=run_all_bigquery,

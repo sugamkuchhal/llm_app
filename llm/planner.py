@@ -11,8 +11,8 @@ def call_planner(
     system_prompt,
     planner_prompt,
     metadata,
-    default_data,
-    all_data,
+    allowed_dimension_rows,
+    selected_default_dimensions,
     model
 ):
     MAX_PLANNER_TURNS = int(os.getenv("MAX_PLANNER_TURNS", 4))
@@ -28,11 +28,11 @@ CHAT HISTORY:
 METADATA:
 {metadata}
 
-DEFAULT DATA:
-{default_data}
+ALLOWED_DIMENSION_ROWS (SYSTEM-PROVIDED; YOU MUST CHOOSE FROM THESE):
+{json.dumps(allowed_dimension_rows, indent=2)}
 
-ALL DATA:
-{all_data}
+SELECTED_DEFAULT_DIMENSIONS (USE UNLESS USER OVERRIDES):
+{json.dumps(selected_default_dimensions, indent=2)}
 
 QUESTION:
 {question}

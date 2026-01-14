@@ -5,79 +5,10 @@ import logging
 import hashlib
 import time
 import uuid
-import re
-
 from validators.answer_validator import validate_answer
 from validators.manifest_validator import validate_manifest
-from charts.builder import build_bq_style_chart
-from domain.barc.barc_filters import build_filters
-from domain.barc.barc_rules import has_dead_hours_filter
 
 logger = logging.getLogger("logger")
-
-
-def apply_dead_hours_filter(sql: str) -> str:
-    """
-    Inject dead-hours exclusion into the OUTERMOST query only.
-
-    Domain rule: dead hours are identified via LEFT(time_band_half_hour, 2) IN ('00'..'05').
-    This injector is best-effort and only applies when the query references `time_band_half_hour`.
-    """
-    if not re.search(r"\btime_band_half_hour\b", sql, flags=re.IGNORECASE):
-        return sql
-
-    # Prefer a qualified reference if present (e.g., t.time_band_half_hour).
-    m = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*time_band_half_hour\b", sql)
-    col_ref = f"{m.group(1)}.time_band_half_hour" if m else "time_band_half_hour"
-
-    condition = f"LEFT({col_ref}, 2) NOT IN ('00','01','02','03','04','05')"
-
-    sql_lower = sql.lower()
-
-    # Find the LAST occurrence of FROM (outermost query)
-    from_idx = sql_lower.rfind(" from ")
-    if from_idx == -1:
-        return sql  # fail-safe: do nothing
-
-    # Find clauses AFTER FROM
-    tail = sql[from_idx:]
-    tail_lower = tail.lower()
-
-    clause_keywords = [" group by ", " order by ", " having ", " qualify ", " limit "]
-
-    where_rel = tail_lower.find(" where ")
-    if where_rel != -1:
-        # Insert AND <condition> before the next clause after WHERE (or end of SQL)
-        after_where_rel = where_rel + len(" where ")
-        after_where = tail_lower[after_where_rel:]
-
-        next_clause_rel = None
-        for kw in clause_keywords:
-            idx = after_where.find(kw)
-            if idx != -1 and (next_clause_rel is None or idx < next_clause_rel):
-                next_clause_rel = idx
-
-        if next_clause_rel is None:
-            insert_pos = len(sql)
-        else:
-            insert_pos = from_idx + after_where_rel + next_clause_rel
-
-        before = sql[:insert_pos].rstrip()
-        after = sql[insert_pos:].lstrip()
-        return f"{before}\n  AND {condition}\n{after}" if after else f"{before}\n  AND {condition}"
-
-    # No WHERE in the outermost query: insert WHERE <condition> before next clause (or end)
-    next_clause_rel = None
-    for kw in clause_keywords:
-        idx = tail_lower.find(kw)
-        if idx != -1 and (next_clause_rel is None or idx < next_clause_rel):
-            next_clause_rel = idx
-
-    insert_pos = len(sql) if next_clause_rel is None else (from_idx + next_clause_rel)
-    before = sql[:insert_pos].rstrip()
-    after = sql[insert_pos:].lstrip()
-    return f"{before}\nWHERE {condition}\n{after}" if after else f"{before}\nWHERE {condition}"
-
 
 
 def run_analysis(
@@ -90,6 +21,8 @@ def run_analysis(
     extract_metric_manifest,
     extract_all_sql,
     extract_all_output_schema,
+    extract_filters,
+    validate_filters,
     validate_output_schema,
     validate_metric_sql_binding,
     run_all_bigquery,
@@ -164,10 +97,14 @@ def run_analysis(
         validate_output_schema(output_schemas[idx], idx)
         q["output_schema"] = output_schemas[idx]
 
-    # ---- Dead-hours enforcement (default ON) ----
-    if not has_dead_hours_filter(planner_text):
-        for q in sql_blocks:
-            q["sql"] = apply_dead_hours_filter(q["sql"])
+    # Filters block (MANDATORY, deterministic)
+    parsed_filters = extract_filters(planner_text)
+    validate_filters(
+        parsed_filters=parsed_filters,
+        sql_blocks=sql_blocks,
+        question=question,
+        planner_text=planner_text,
+    )
 
     t0 = time.perf_counter()
     raw_bq_results = run_all_bigquery(sql_blocks)
@@ -182,10 +119,7 @@ def run_analysis(
 
     metric_payload = build_metric_payload(metric_manifest, raw_bq_results)
 
-    metric = metric_manifest[0]
-    sql_text = metric_payload[0]["results"][0]["sql"]
-
-    filters = build_filters(metric, sql_text, planner_text)
+    filters = parsed_filters.get("filters_list", [])
 
     logger.info(
         "Metric payload built for interpreter | metric_count=%d",
