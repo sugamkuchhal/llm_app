@@ -367,11 +367,86 @@ def extract_all_sql(text: str):
     return sql_blocks
 
 def strip_sql_comments(sql: str) -> str:
-    # Remove single-line comments
-    sql = re.sub(r"--.*?$", "", sql, flags=re.MULTILINE)
-    # Remove multi-line comments
-    sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
-    return sql
+    """
+    Remove SQL comments deterministically while preserving comment-like tokens
+    inside string/identifier literals.
+
+    Supports:
+    - Line comments: -- ... <newline>
+    - Block comments: /* ... */
+
+    Respects:
+    - Single-quoted strings: '...'
+      (handles escaped quotes via doubled single quote: '')
+    - Backtick identifiers: `...`
+    - Double-quoted identifiers/strings: "..."
+      (best-effort; BigQuery typically uses backticks for identifiers)
+    """
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+
+    in_single = False
+    in_double = False
+    in_backtick = False
+
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        # Toggle literal states (only when not inside another literal type)
+        if not in_double and not in_backtick and ch == "'":
+            if in_single:
+                # Handle escaped single quote: ''
+                if nxt == "'":
+                    out.append("''")
+                    i += 2
+                    continue
+                in_single = False
+                out.append(ch)
+                i += 1
+                continue
+            in_single = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if not in_single and not in_backtick and ch == '"':
+            in_double = not in_double
+            out.append(ch)
+            i += 1
+            continue
+
+        if not in_single and not in_double and ch == "`":
+            in_backtick = not in_backtick
+            out.append(ch)
+            i += 1
+            continue
+
+        # Comment removal only when not inside a literal
+        if not (in_single or in_double or in_backtick):
+            # Line comment
+            if ch == "-" and nxt == "-":
+                # Skip until newline (keep newline if present)
+                i += 2
+                while i < n and sql[i] != "\n":
+                    i += 1
+                continue
+
+            # Block comment
+            if ch == "/" and nxt == "*":
+                i += 2
+                while i < n:
+                    if sql[i] == "*" and (i + 1) < n and sql[i + 1] == "/":
+                        i += 2
+                        break
+                    i += 1
+                continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
 
 
 # --------------------------------------------------
