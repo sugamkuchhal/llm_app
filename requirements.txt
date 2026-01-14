@@ -5,6 +5,5 @@ google-cloud-aiplatform
 vertexai
 jsonschema
 markdown
-pytest
 jinja2
 requests
