@@ -5,6 +5,7 @@ import logging
 import hashlib
 import time
 import uuid
+import re
 
 from validators.answer_validator import validate_answer
 from validators.manifest_validator import validate_manifest
@@ -17,9 +18,19 @@ logger = logging.getLogger("logger")
 
 def apply_dead_hours_filter(sql: str) -> str:
     """
-    Safely inject dead-hours filter into the OUTERMOST query only.
+    Inject dead-hours exclusion into the OUTERMOST query only.
+
+    Domain rule: dead hours are identified via LEFT(time_band_half_hour, 2) IN ('00'..'05').
+    This injector is best-effort and only applies when the query references `time_band_half_hour`.
     """
-    condition = "hour NOT IN ('00','01','02','03','04','05')"
+    if not re.search(r"\btime_band_half_hour\b", sql, flags=re.IGNORECASE):
+        return sql
+
+    # Prefer a qualified reference if present (e.g., t.time_band_half_hour).
+    m = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*time_band_half_hour\b", sql)
+    col_ref = f"{m.group(1)}.time_band_half_hour" if m else "time_band_half_hour"
+
+    condition = f"LEFT({col_ref}, 2) NOT IN ('00','01','02','03','04','05')"
 
     sql_lower = sql.lower()
 
@@ -32,23 +43,40 @@ def apply_dead_hours_filter(sql: str) -> str:
     tail = sql[from_idx:]
     tail_lower = tail.lower()
 
-    for kw in [" where ", " group by ", " order by ", " having ", " qualify "]:
+    clause_keywords = [" group by ", " order by ", " having ", " qualify ", " limit "]
+
+    where_rel = tail_lower.find(" where ")
+    if where_rel != -1:
+        # Insert AND <condition> before the next clause after WHERE (or end of SQL)
+        after_where_rel = where_rel + len(" where ")
+        after_where = tail_lower[after_where_rel:]
+
+        next_clause_rel = None
+        for kw in clause_keywords:
+            idx = after_where.find(kw)
+            if idx != -1 and (next_clause_rel is None or idx < next_clause_rel):
+                next_clause_rel = idx
+
+        if next_clause_rel is None:
+            insert_pos = len(sql)
+        else:
+            insert_pos = from_idx + after_where_rel + next_clause_rel
+
+        before = sql[:insert_pos].rstrip()
+        after = sql[insert_pos:].lstrip()
+        return f"{before}\n  AND {condition}\n{after}" if after else f"{before}\n  AND {condition}"
+
+    # No WHERE in the outermost query: insert WHERE <condition> before next clause (or end)
+    next_clause_rel = None
+    for kw in clause_keywords:
         idx = tail_lower.find(kw)
-        if idx != -1:
-            insert_pos = from_idx + idx
-            break
-    else:
-        insert_pos = len(sql)
+        if idx != -1 and (next_clause_rel is None or idx < next_clause_rel):
+            next_clause_rel = idx
 
-    head = sql[:insert_pos]
-    rest = sql[insert_pos:]
-
-    if " where " in head.lower():
-        head += f"\nAND {condition}"
-    else:
-        head += f"\nWHERE {condition}"
-
-    return head + rest
+    insert_pos = len(sql) if next_clause_rel is None else (from_idx + next_clause_rel)
+    before = sql[:insert_pos].rstrip()
+    after = sql[insert_pos:].lstrip()
+    return f"{before}\nWHERE {condition}\n{after}" if after else f"{before}\nWHERE {condition}"
 
 
 
