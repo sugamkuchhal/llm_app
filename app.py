@@ -89,8 +89,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Helpers
 # --------------------------------------------------
 def load_file(path):
-    with open(os.path.join(BASE_DIR, path), "r") as f:
-        return f.read()
+    """
+    Deterministic file loader:
+    - UTF-8 (strict)
+    - stable newlines (normalize to \\n)
+    """
+    full_path = os.path.join(BASE_DIR, path)
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="strict") as f:
+            # Note: Python's text mode already does universal newlines, but we
+            # normalize explicitly for hash stability across environments.
+            text = f.read()
+    except OSError as e:
+        raise RuntimeError(f"Failed to read file: {full_path}") from e
+
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 DOMAIN = "barc"
 

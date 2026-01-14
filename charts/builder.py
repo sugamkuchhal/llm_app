@@ -347,4 +347,3 @@ def build_bq_style_chart(rows, schema):
 
         return None
 
-
