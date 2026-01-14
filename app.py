@@ -247,7 +247,13 @@ def extract_filters(planner_text: str) -> dict:
     return {"filters": parsed, "filters_list": filters_list}
 
 
-def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], question: str):
+def make_validate_filters(
+    *,
+    allowed_rows: list[dict],
+    candidates: list[dict],
+    question: str,
+    selected_default_dimensions: dict | None = None,
+):
     """
     Create a validator closure that enforces:
     - region/target must be ALL unless user specified them in the question (best-effort)
@@ -367,17 +373,26 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
         )
 
         # Force region/target to ALL unless user specified them.
+        default_notes: list[str] = []
         if not user_specified_region and region.upper() != "ALL":
             f["region"]["value"] = "ALL"
             region = "ALL"
+            if selected_default_dimensions and "region" in selected_default_dimensions:
+                default_notes.append(
+                    f"Default Region (not applied): {selected_default_dimensions.get('region')}"
+                )
         if not user_specified_target and target.upper() != "ALL":
             f["target"]["value"] = "ALL"
             target = "ALL"
+            if selected_default_dimensions and "target" in selected_default_dimensions:
+                default_notes.append(
+                    f"Default Target (not applied): {selected_default_dimensions.get('target')}"
+                )
 
         # Rebuild the user-visible list after any normalization.
         parsed_filters["filters_list"] = [
             f"{k}: {f[k]['value']}" for k in ["genre", "region", "target", "channel", "time_window"]
-        ]
+        ] + default_notes
 
         def _sql_touches(sql: str, table: str) -> bool:
             s = (sql or "").lower()
@@ -1376,6 +1391,7 @@ def index():
                     allowed_rows=allowed_rows,
                     candidates=candidates,
                     question=question,
+                    selected_default_dimensions=selected_default,
                 ),
                 validate_output_schema=validate_output_schema,
                 validate_metric_sql_binding=validate_metric_sql_binding,
