@@ -11,6 +11,7 @@ Behavioral rules:
 - If information is missing, state it clearly.
 - Do not guess table schemas.
 - For week-based windows like "last/latest N weeks", prefer using week_id consistently across BARC tables.
+- Do not confuse genre codes (e.g., HSM/EBN/HBN) with Region. Region is a market/geography dimension.
 
 Operating modes:
 - Planner mode: decide approach and generate SQL.

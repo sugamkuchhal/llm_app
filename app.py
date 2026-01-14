@@ -144,7 +144,7 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "ab071d8a8cf06859cc5048f91a72ed12bc684f0e6ea92815863a5450def15486"
+SYSTEM_PROMPT_HASH = "8386449207f92e38e138bcfe2d3227865d61d64d5159cacc772c8c6b38b2c3ff"
 PLANNER_PROMPT_HASH = "ce28b3fc8687ad1b98943ffe220ad0d3132db737bcb7f8fb42a78285a9e39d1d"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
@@ -387,6 +387,7 @@ def make_validate_filters(
         #   from SELECTED_DEFAULT_DIMENSIONS (instead of using the no-filter sentinel).
         # - If FILTERS indicates no-filter for region/target, SQL must not contain those predicates.
         # - If FILTERS indicates a specific region/target, SQL must include the corresponding predicate.
+        genre = (f["genre"]["value"] or "").strip()
         region = (f["region"]["value"] or "").strip()
         target = (f["target"]["value"] or "").strip()
         time_window = (f["time_window"]["value"] or "").strip()
@@ -421,6 +422,21 @@ def make_validate_filters(
             re.search(r"\b(include|including|with)\s+dead\s+hours\b", qtext)
             or re.search(r"\ball\s+hours\b|\b24x7\b|\b24\s*/\s*7\b", qtext)
         )
+
+        # Heuristic correction: prevent genre codes (e.g. HSM/EBN/HBN) from being placed in region.
+        # Example: "top performing timebands for NDTV in HSM" -> HSM is a genre, not a region.
+        inferred_genre = resolve_genre(question)
+        if (
+            inferred_genre
+            and not user_specified_region
+            and not _is_no_filter(region)
+            and (region or "").strip().lower() == inferred_genre.strip().lower()
+            and _is_no_filter(genre)
+        ):
+            f["genre"]["value"] = inferred_genre
+            genre = inferred_genre
+            f["region"]["value"] = NO_FILTER_SENTINEL
+            region = NO_FILTER_SENTINEL
 
         # Apply region/target defaults unless user specified them.
         default_notes: list[str] = []
