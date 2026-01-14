@@ -511,14 +511,31 @@ def make_validate_filters(
             s = (sql or "").lower()
             # Accept either INTERVAL n WEEK or INTERVAL (n*7) DAY
             days = n * 7
+            dc = re.escape(date_col.lower())
+
+            # CURRENT_DATE() may optionally include a timezone, e.g. CURRENT_DATE("Asia/Kolkata")
+            cur_date = r"current_date\s*\(\s*(?:\"[^\"]+\"|\'.+?\')?\s*\)"
+            sub_weeks = rf"date_sub\(\s*{cur_date}\s*,\s*interval\s*{n}\s*week\s*\)"
+            sub_days = rf"date_sub\(\s*{cur_date}\s*,\s*interval\s*{days}\s*day\s*\)"
+
+            # Allow DATE(col) wrapper as well.
+            col_or_datecol = rf"(?:\b{dc}\b|date\s*\(\s*\b{dc}\b\s*\))"
+
             ok = bool(
-                re.search(rf"\b{re.escape(date_col.lower())}\b\s*>=\s*date_sub\(\s*current_date\(\)\s*,\s*interval\s*{n}\s*week\s*\)", s)
-                or re.search(rf"\b{re.escape(date_col.lower())}\b\s*>=\s*date_sub\(\s*current_date\(\)\s*,\s*interval\s*{days}\s*day\s*\)", s)
+                # >= DATE_SUB(CURRENT_DATE(), INTERVAL n WEEK|days DAY)
+                re.search(rf"{col_or_datecol}\s*>=\s*{sub_weeks}", s)
+                or re.search(rf"{col_or_datecol}\s*>=\s*{sub_days}", s)
+                # BETWEEN DATE_SUB(...) AND CURRENT_DATE()
+                or re.search(rf"{col_or_datecol}\s+between\s+{sub_weeks}\s+and\s+{cur_date}", s)
+                or re.search(rf"{col_or_datecol}\s+between\s+{sub_days}\s+and\s+{cur_date}", s)
             )
             if not ok:
                 raise RuntimeError(
                     f"Missing 'last {n} weeks' date filter on {date_col}. "
-                    f"Expected {date_col} >= DATE_SUB(CURRENT_DATE(), INTERVAL {n} WEEK) (or {days} DAY)."
+                    f"Expected patterns like "
+                    f"{date_col} >= DATE_SUB(CURRENT_DATE(), INTERVAL {n} WEEK) "
+                    f"or {date_col} BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {n} WEEK) AND CURRENT_DATE() "
+                    f"(also accepts DATE({date_col}) wrappers and {days} DAY equivalent)."
                 )
 
         def _require_some_date_filter(sql: str, date_col: str):
