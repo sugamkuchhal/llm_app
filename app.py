@@ -119,6 +119,11 @@ PLANNER_PROMPT = load_file(f"domain/{DOMAIN}/{DOMAIN}_context_planner.txt")
 DEFAULT_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_default.json")
 META_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_meta.json")
 
+try:
+    DOMAIN_META = json.loads(META_DATA)
+except json.JSONDecodeError as e:
+    raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
+
 SYSTEM_PROMPT_HASH = "684508a01ca429b46242bb5ac342cf9891a5c65274fb0cc9115e73af89388d0a"
 PLANNER_PROMPT_HASH = "423e2b23999532dda04c55f73aa0b69c44a953d9522780d1401460972ee2a117"
 
@@ -455,6 +460,120 @@ def strip_sql_comments(sql: str) -> str:
 # --------------------------------------------------
 # BigQuery execution
 # --------------------------------------------------
+def _build_domain_column_index(domain_meta: dict) -> dict[str, list[dict]]:
+    """
+    Build a case-insensitive lookup from column name -> metadata entries.
+    """
+    index: dict[str, list[dict]] = {}
+
+    for table_name, table_meta in domain_meta.items():
+        if table_name in ("_meta", "global"):
+            continue
+        if not isinstance(table_meta, dict):
+            continue
+        cols = table_meta.get("columns")
+        if not isinstance(cols, dict):
+            continue
+
+        for col_name, col_meta in cols.items():
+            if not isinstance(col_name, str) or not isinstance(col_meta, dict):
+                continue
+            key = col_name.lower()
+            index.setdefault(key, []).append(
+                {
+                    "table": table_name,
+                    "name": col_name,
+                    "role": col_meta.get("role"),
+                    "data_type": col_meta.get("dataType"),
+                    "business_description": col_meta.get("business_description"),
+                    "semantic_tags": col_meta.get("semanticTags") or [],
+                }
+            )
+
+    return index
+
+
+def _build_time_column_index(domain_meta: dict) -> dict[str, str]:
+    """
+    Build a case-insensitive lookup from time column -> time level (year/week/date/...).
+    """
+    out: dict[str, str] = {}
+    levels = (
+        domain_meta.get("global", {})
+        .get("time_hierarchy", {})
+        .get("levels", {})
+    )
+    if not isinstance(levels, dict):
+        return out
+
+    for level, info in levels.items():
+        cols = (info or {}).get("columns", [])
+        if not isinstance(cols, list):
+            continue
+        for c in cols:
+            if isinstance(c, str):
+                out[c.lower()] = level
+    return out
+
+
+DOMAIN_COLUMN_INDEX = _build_domain_column_index(DOMAIN_META)
+DOMAIN_TIME_INDEX = _build_time_column_index(DOMAIN_META)
+
+
+def annotate_output_fields(*, field_names: list[str], schema: list[dict], domain_meta: dict) -> list[dict]:
+    """
+    Label output fields using domain metadata.
+
+    Output shape (per field):
+    - name
+    - bq_type
+    - role: dimension|kpi|unknown
+    - dimension_type: time|categorical|None
+    - time_level: year|week|date|half_hour|program_airing|None
+    - semantic_tags (if known)
+    - business_description (if known)
+    """
+    schema_by_name = {f.get("name"): f for f in (schema or []) if isinstance(f, dict)}
+
+    annotated: list[dict] = []
+    for name in field_names:
+        # Prefer exact schema entry; fall back to case-insensitive search.
+        schema_entry = schema_by_name.get(name)
+        if schema_entry is None:
+            schema_entry = next(
+                (v for k, v in schema_by_name.items() if isinstance(k, str) and k.lower() == name.lower()),
+                None,
+            )
+
+        candidates = DOMAIN_COLUMN_INDEX.get(name.lower(), [])
+        role = "unknown"
+        if any(c.get("role") == "kpi" for c in candidates):
+            role = "kpi"
+        elif any(c.get("role") == "dimension" for c in candidates):
+            role = "dimension"
+
+        time_level = DOMAIN_TIME_INDEX.get(name.lower())
+        dimension_type = None
+        if role == "dimension":
+            dimension_type = "time" if time_level else "categorical"
+
+        best = candidates[0] if candidates else {}
+
+        annotated.append(
+            {
+                "name": name,
+                "bq_type": (schema_entry or {}).get("type"),
+                "role": role,
+                "dimension_type": dimension_type,
+                "time_level": time_level,
+                "semantic_tags": best.get("semantic_tags", []),
+                "business_description": best.get("business_description"),
+            }
+        )
+
+    return annotated
+
+
 def _bq_schema_to_json(schema) -> list[dict]:
     """
     Convert BigQuery SchemaField objects to JSON-serializable dicts.
@@ -534,12 +653,21 @@ def run_all_bigquery(queries):
             rows = [dict(row) for row in job.result(max_results=MAX_ROWS)]
             rows = _normalize_bq_rows(rows)
             schema = _bq_schema_to_json(job.schema)
+            field_names = [f.get("name") for f in schema if isinstance(f, dict) and f.get("name")]
+            if not field_names and rows:
+                field_names = sorted(rows[0].keys())
+            field_info = annotate_output_fields(
+                field_names=field_names,
+                schema=schema,
+                domain_meta=DOMAIN_META,
+            )
 
             results.append({
                 "metric_index": metric_index,
                 "sql": sql,
                 "rows": rows,
-                "schema": schema
+                "schema": schema,
+                "field_info": field_info,
             })
         except Exception as e:
             logger.exception("BigQuery execution failed | metric_index=%s", metric_index)
@@ -817,7 +945,7 @@ def index():
             metric_payload = result["metric_payload"]
 
 #            answer = build_ui_answer(core_answer, metric_payload)
-            answer = build_ui_answer(core_answer, metric_payload, json.loads(META_DATA))
+            answer = build_ui_answer(core_answer, metric_payload, DOMAIN_META)
 
         except Exception as e:
             error = str(e)
