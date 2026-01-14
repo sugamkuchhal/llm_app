@@ -5,6 +5,7 @@ import logging
 import hashlib
 import time
 import uuid
+import re
 from validators.answer_validator import validate_answer
 from validators.manifest_validator import validate_manifest
 
@@ -61,7 +62,9 @@ def run_analysis(
     
     # Disallow SQL outside SQL blocks (basic guard)
     before_sql_blocks = planner_text.split("BEGIN_SQL_BLOCK_1", 1)[0]
-    if "SELECT" in before_sql_blocks.upper():
+    # Only fail if there is an actual SQL statement outside markers.
+    # Avoid false positives like the word "SELECTED".
+    if re.search(r"(?im)^\s*(select|with)\b", before_sql_blocks):
         raise RuntimeError("SQL detected outside SQL block markers")
     
     # ===== END STEP 4 CHECKS =====
