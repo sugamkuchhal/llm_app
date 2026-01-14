@@ -26,7 +26,7 @@ from validators.answer_validator import validate_answer
 from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
-from domain.barc.dimension_reference import fetch_default_dimension_rows
+from domain.barc.barc_dimension_reference import fetch_default_dimension_rows
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
 from config.prompt_guard import assert_prompt_unchanged, hash_text
@@ -57,8 +57,8 @@ SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
 MAX_TURNS = int(os.getenv("MAX_TURNS", 10))
 
 MAX_BQ_BYTES = int(
-    os.getenv("MAX_BQ_BYTES", 10 * 1024 * 1024 * 1024)
-)  # default: 10 GB
+    os.getenv("MAX_BQ_BYTES", 200 * 1024 * 1024 * 1024)
+)  # default: 200 GB
 
 MAX_ROWS = int(os.getenv("MAX_ROWS", 50000))
 

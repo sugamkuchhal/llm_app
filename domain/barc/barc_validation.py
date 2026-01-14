@@ -9,7 +9,7 @@ def shadow_resolve_dimensions_bq(
     channel
 ):
     """
-    BARC1 shadow-mode resolution using barc_slm_poc.dimension_reference.
+    BARC1 shadow-mode resolution using barc_slm_poc.barc_dimension_reference.
     Read-only. No behavior change.
     """
 
@@ -41,7 +41,7 @@ def shadow_resolve_dimensions_bq(
           target,
           channel,
           is_default
-        FROM barc_slm_poc.dimension_reference
+        FROM barc_slm_poc.barc_dimension_reference
         WHERE {where_clause}
         ORDER BY is_default DESC
         LIMIT 1

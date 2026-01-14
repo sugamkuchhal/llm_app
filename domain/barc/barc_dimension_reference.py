@@ -5,7 +5,7 @@ def fetch_default_dimension_rows(
     *,
     bq_client,
     dataset: str = "barc_slm_poc",
-    table: str = "dimension_reference",
+    table: str = "barc_dimension_reference",
     limit: int = 100,
 ):
     """
