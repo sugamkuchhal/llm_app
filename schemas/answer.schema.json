@@ -23,6 +23,7 @@
         "properties": {
           "metric_id": { "type": "string" },
           "metric_name": { "type": "string" },
+          "business_question": { "type": "string" },
           "definition": { "type": "string" },
           "results": {
             "type": "array",
