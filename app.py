@@ -127,11 +127,42 @@ assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
 # Session memory
 # --------------------------------------------------
 def get_chat_history():
-    return session.setdefault("chat_history", [])
+    """
+    Returns the current chat history from the session.
+
+    Policy A (self-healing): if the stored value is malformed, reset it to [].
+    """
+    h = session.get("chat_history")
+    if h is None:
+        session["chat_history"] = []
+        return session["chat_history"]
+
+    if not isinstance(h, list):
+        session["chat_history"] = []
+        return session["chat_history"]
+
+    # Best-effort sanitization: keep only dict entries (stable shape downstream).
+    sanitized = [x for x in h if isinstance(x, dict)]
+    if sanitized is not h:
+        session["chat_history"] = sanitized
+    return session["chat_history"]
 
 def append_chat_turn(question, headline):
     h = get_chat_history()
-    h.append({"question": question, "headline": headline})
+
+    # Normalize to deterministic, JSON-serializable primitives.
+    q = (question or "")
+    if not isinstance(q, str):
+        q = str(q)
+    q = q.strip()
+
+    hl = None if headline is None else headline
+    if hl is not None and not isinstance(hl, str):
+        hl = str(hl)
+    if isinstance(hl, str):
+        hl = hl.strip()
+
+    h.append({"question": q, "headline": hl})
     session["chat_history"] = h[-MAX_TURNS:]
 
 def extract_metric_manifest(text: str):
