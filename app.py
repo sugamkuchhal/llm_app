@@ -835,9 +835,12 @@ def run_all_bigquery(queries):
                 maximum_bytes_billed=MAX_BQ_BYTES,
             )
             job = bq_client.query(sql, job_config=exec_cfg, location=BQ_REGION)
-            rows = [dict(row) for row in job.result(max_results=MAX_ROWS)]
+            result_iter = job.result(max_results=MAX_ROWS)
+            rows = [dict(row) for row in result_iter]
             rows = _normalize_bq_rows(rows)
-            schema = _bq_schema_to_json(job.schema)
+            # Prefer RowIterator schema (more reliable), fall back to job.schema.
+            schema_fields = getattr(result_iter, "schema", None) or job.schema
+            schema = _bq_schema_to_json(schema_fields)
 
             # Validate declared output schema against actual BigQuery output.
             declared_names = [x.get("name") for x in output_schema if isinstance(x, dict)]
@@ -846,9 +849,26 @@ def run_all_bigquery(queries):
             declared_names = [n.strip() for n in declared_names]  # type: ignore[assignment]
 
             actual_names = [f.get("name") for f in schema if isinstance(f, dict) and f.get("name")]
-            if [n.lower() for n in declared_names] != [n.lower() for n in actual_names]:
+            if not actual_names and rows:
+                # Last-resort fallback: infer from row keys (preserves row/dict order).
+                actual_names = list(rows[0].keys())
+                schema = [{"name": n, "type": None, "mode": None, "description": None} for n in actual_names]
+
+            if not actual_names:
+                raise RuntimeError(
+                    f"BigQuery returned no output schema columns for query #{metric_index}"
+                )
+
+            declared_lower = [n.lower() for n in declared_names]
+            actual_lower = [n.lower() for n in actual_names]
+            if set(declared_lower) != set(actual_lower):
                 raise RuntimeError(
                     f"OUTPUT_SCHEMA mismatch for query #{metric_index}: "
+                    f"declared={declared_names} actual={actual_names}"
+                )
+            if declared_lower != actual_lower:
+                raise RuntimeError(
+                    f"OUTPUT_SCHEMA column order mismatch for query #{metric_index}: "
                     f"declared={declared_names} actual={actual_names}"
                 )
 
