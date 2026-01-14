@@ -10,7 +10,7 @@ import warnings
 import base64
 import datetime
 from decimal import Decimal
-from utils.logging_setup import configure_logging, set_request_id
+from utils.logging_setup import configure_logging, set_request_id, get_log_buffer
 
 warnings.filterwarnings(
     "ignore",
@@ -1167,6 +1167,37 @@ def index():
         answer=answer,
         error=error
     )
+
+
+@app.route("/_debug/logs", methods=["GET"])
+def debug_logs():
+    """
+    Debug helper for retrieving recent logs without Cloud Logging export.
+
+    Enabled only when:
+    - ENABLE_LOG_BUFFER=1 (to collect logs)
+    - DEBUG_TOKEN is set and provided as ?token=...
+    """
+    expected = os.getenv("DEBUG_TOKEN")
+    token = request.args.get("token")
+    if not expected or token != expected:
+        return {"error": "forbidden"}, 403
+
+    buf = get_log_buffer()
+    if not buf:
+        return {"error": "log buffer disabled (set ENABLE_LOG_BUFFER=1)"}, 400
+
+    rid = request.args.get("request_id")
+    try:
+        limit = int(request.args.get("limit", "500"))
+    except ValueError:
+        limit = 500
+
+    return {
+        "request_id": rid,
+        "limit": limit,
+        "logs": buf.get(request_id=rid, limit=limit),
+    }
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True, use_reloader=False)
