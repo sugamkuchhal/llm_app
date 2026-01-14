@@ -109,7 +109,7 @@ INSTRUCTIONS 01.11 = For each metric, you MUST generate exactly ONE SQL query.
 - Even if the reasoning involves multiple steps, they must be combined into a single SQL query using CTEs.
 - Do NOT declare multiple SQL blocks unless explicitly instructed by the user.
 
-====================
+--------------------
 
 Additional Rules are as under
 
