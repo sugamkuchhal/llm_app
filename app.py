@@ -890,7 +890,7 @@ HTML = """
 <!doctype html>
 <html>
 <head>
-<title>SLM Analytics</title>
+<title>Network18 Ask Me Analytics</title>
 
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
@@ -921,7 +921,7 @@ pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 </head>
 
 <body>
-<h2>SLM Analytics</h2>
+<h2>Network18 Ask Me Analytics</h2>
 
 <form id="askForm" method="post" onsubmit="handleSubmit(event)">
   <input name="question" required style="width:700px;padding:6px">
