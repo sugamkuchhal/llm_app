@@ -7,7 +7,6 @@ import time
 import uuid
 from validators.answer_validator import validate_answer
 from validators.manifest_validator import validate_manifest
-from domain.barc.barc_filters import build_filters
 
 logger = logging.getLogger("logger")
 
@@ -22,6 +21,8 @@ def run_analysis(
     extract_metric_manifest,
     extract_all_sql,
     extract_all_output_schema,
+    extract_filters,
+    validate_filters,
     validate_output_schema,
     validate_metric_sql_binding,
     run_all_bigquery,
@@ -96,6 +97,15 @@ def run_analysis(
         validate_output_schema(output_schemas[idx], idx)
         q["output_schema"] = output_schemas[idx]
 
+    # Filters block (MANDATORY, deterministic)
+    parsed_filters = extract_filters(planner_text)
+    validate_filters(
+        parsed_filters=parsed_filters,
+        sql_blocks=sql_blocks,
+        question=question,
+        planner_text=planner_text,
+    )
+
     t0 = time.perf_counter()
     raw_bq_results = run_all_bigquery(sql_blocks)
     bq_ms = int((time.perf_counter() - t0) * 1000)
@@ -109,10 +119,7 @@ def run_analysis(
 
     metric_payload = build_metric_payload(metric_manifest, raw_bq_results)
 
-    metric = metric_manifest[0]
-    sql_text = metric_payload[0]["results"][0]["sql"]
-
-    filters = build_filters(metric, sql_text, planner_text)
+    filters = parsed_filters.get("filters_list", [])
 
     logger.info(
         "Metric payload built for interpreter | metric_count=%d",

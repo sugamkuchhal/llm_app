@@ -26,6 +26,7 @@ from validators.answer_validator import validate_answer
 from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
+from domain.barc.barc_mappings import resolve_genre
 from domain.barc.barc_dimension_reference import (
     fetch_default_dimension_rows,
     fetch_candidate_dimension_rows_for_question,
@@ -205,6 +206,183 @@ def extract_metric_manifest(text: str):
         raise RuntimeError(
             f"Invalid METRIC_MANIFEST JSON at pos={e.pos}: {e.msg} | context='{context}'"
         ) from e
+
+
+def extract_filters(planner_text: str) -> dict:
+    """
+    Extract and parse the mandatory BEGIN_FILTERS/END_FILTERS block.
+    """
+    begin = "BEGIN_FILTERS"
+    end = "END_FILTERS"
+    if planner_text.count(begin) != 1 or planner_text.count(end) != 1:
+        raise RuntimeError("Planner must return exactly one FILTERS block")
+
+    b = planner_text.find(begin)
+    e = planner_text.find(end)
+    if b == -1 or e == -1 or e <= b:
+        raise RuntimeError("Invalid FILTERS marker ordering")
+
+    block = planner_text[b + len(begin):e].strip()
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+
+    parsed: dict[str, dict] = {}
+    for ln in lines:
+        if not ln.startswith("-"):
+            continue
+        body = ln.lstrip("-").strip()
+        if ":" not in body:
+            continue
+        key, rest = body.split(":", 1)
+        key = key.strip().lower()
+        parts = [p.strip() for p in rest.split(":") if p.strip()]
+        value = parts[-1] if parts else ""
+        parsed[key] = {"raw": ln, "value": value}
+
+    required = ["genre", "region", "target", "channel", "time_window"]
+    missing = [k for k in required if k not in parsed]
+    if missing:
+        raise RuntimeError(f"FILTERS block missing required keys: {missing}")
+
+    filters_list = [f"{k}: {parsed[k]['value']}" for k in required]
+    return {"filters": parsed, "filters_list": filters_list}
+
+
+def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], question: str):
+    """
+    Create a validator closure that enforces:
+    - region/target must be ALL unless user specified them in the question (best-effort)
+    - chosen dimension values must exist in allowed_rows (column-wise)
+    - if all 4 dims are specified (non-ALL), the tuple must exist in allowed_rows
+    - SQL must not contain region/target equality filters when FILTERS says ALL
+    """
+    q = (question or "").lower()
+
+    def _contains_any(values: set[str]) -> bool:
+        for v in values:
+            if v and v.lower() in q:
+                return True
+        return False
+
+    # Best-effort "user specified" detection using bounded candidate rows.
+    cand_regions = {str(r.get("region", "")).strip() for r in (candidates or []) if r.get("region")}
+    cand_targets = {str(r.get("target", "")).strip() for r in (candidates or []) if r.get("target")}
+
+    user_specified_region = _contains_any(cand_regions)
+    user_specified_target = _contains_any(cand_targets)
+
+    # Allowed values by column (derived from allowed rows)
+    allowed_by_col: dict[str, set[str]] = {"genre": set(), "region": set(), "target": set(), "channel": set()}
+    for r in allowed_rows or []:
+        if not isinstance(r, dict):
+            continue
+        for k in allowed_by_col.keys():
+            v = r.get(k)
+            if isinstance(v, str) and v.strip():
+                allowed_by_col[k].add(v.strip().lower())
+
+    def _suggest(col: str, value: str) -> list[str]:
+        v = (value or "").strip().lower()
+        if not v:
+            return []
+        opts = sorted(allowed_by_col.get(col, set()))
+        # Prefer substring matches, else show first few options.
+        hits = [o for o in opts if v in o or o in v]
+        return hits[:8] if hits else opts[:8]
+
+    def _tuple_exists(g: str, r: str, t: str, c: str) -> bool:
+        key = (g.lower(), r.lower(), t.lower(), c.lower())
+        for row in allowed_rows or []:
+            if not isinstance(row, dict):
+                continue
+            rk = (
+                (row.get("genre") or "").strip().lower(),
+                (row.get("region") or "").strip().lower(),
+                (row.get("target") or "").strip().lower(),
+                (row.get("channel") or "").strip().lower(),
+            )
+            if rk == key:
+                return True
+        return False
+
+    def _suggest_tuple(g: str, r: str, t: str, c: str) -> dict | None:
+        want = {
+            "genre": g.lower(),
+            "region": r.lower(),
+            "target": t.lower(),
+            "channel": c.lower(),
+        }
+        best = None  # (score, tie, row)
+        for row in allowed_rows or []:
+            if not isinstance(row, dict):
+                continue
+            score = 0
+            for k in ("genre", "region", "target", "channel"):
+                rv = (row.get(k) or "").strip().lower()
+                if rv and rv == want[k]:
+                    score += 1
+            tie = (
+                (row.get("genre") or ""),
+                (row.get("region") or ""),
+                (row.get("target") or ""),
+                (row.get("channel") or ""),
+            )
+            if best is None or score > best[0] or (score == best[0] and tie < best[1]):
+                best = (score, tie, row)
+        return best[2] if best else None
+
+    def validate_filters_impl(*, parsed_filters: dict, sql_blocks: list[dict], question: str, planner_text: str):
+        f = parsed_filters["filters"]
+        region = (f["region"]["value"] or "").strip()
+        target = (f["target"]["value"] or "").strip()
+
+        # Enforce "do not query region/target unless specified"
+        if not user_specified_region and region.upper() != "ALL":
+            raise RuntimeError("Region must be ALL unless the user specifies a region")
+        if user_specified_region and region.upper() == "ALL":
+            raise RuntimeError("User specified a region, but FILTERS sets region=ALL")
+
+        if not user_specified_target and target.upper() != "ALL":
+            raise RuntimeError("Target must be ALL unless the user specifies a target")
+        if user_specified_target and target.upper() == "ALL":
+            raise RuntimeError("User specified a target, but FILTERS sets target=ALL")
+
+        # SQL must not include region/target filters if FILTERS says ALL
+        for qb in sql_blocks or []:
+            sql = qb.get("sql", "") or ""
+            if region.upper() == "ALL":
+                if re.search(r"\bregion\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
+                    raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
+            if target.upper() == "ALL":
+                if re.search(r"\btarget\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
+                    raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
+
+        # Validate non-ALL values are in allowed rows (column-wise)
+        for col in ("genre", "region", "target", "channel"):
+            val = (f[col]["value"] or "").strip()
+            if val.upper() == "ALL":
+                continue
+            if val.lower() not in allowed_by_col.get(col, set()):
+                raise RuntimeError(
+                    f"FILTERS {col} value not allowed: '{val}'. Suggestions: {_suggest(col, val)}"
+                )
+
+        # If all 4 dims are specified, validate full tuple exists
+        g = (f["genre"]["value"] or "").strip()
+        r = (f["region"]["value"] or "").strip()
+        t = (f["target"]["value"] or "").strip()
+        c = (f["channel"]["value"] or "").strip()
+        if all(x and x.upper() != "ALL" for x in (g, r, t, c)):
+            if not _tuple_exists(g, r, t, c):
+                suggestion = _suggest_tuple(g, r, t, c)
+                raise RuntimeError(
+                    f"FILTERS tuple not found in allowed dimension rows. "
+                    f"Provided={{genre:{g},region:{r},target:{t},channel:{c}}}. "
+                    f"Suggested={suggestion}"
+                )
+
+        return True
+
+    return validate_filters_impl
 
 def validate_metric_sql_binding(metric_manifest, sql_blocks):
     """
@@ -1065,6 +1243,12 @@ def index():
                 extract_metric_manifest=extract_metric_manifest,
                 extract_all_sql=extract_all_sql,
                 extract_all_output_schema=extract_all_output_schema,
+                extract_filters=extract_filters,
+                validate_filters=make_validate_filters(
+                    allowed_rows=allowed_rows,
+                    candidates=candidates,
+                    question=question,
+                ),
                 validate_output_schema=validate_output_schema,
                 validate_metric_sql_binding=validate_metric_sql_binding,
                 run_all_bigquery=run_all_bigquery,
