@@ -10,5 +10,7 @@ pandas
 numpy
 jinja2
 requests
+authlib
+
 
 
