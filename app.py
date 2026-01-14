@@ -23,7 +23,6 @@ from flask import Flask, request, render_template_string, session
 from google.cloud import bigquery
 from vertexai.preview.generative_models import GenerativeModel
 from validators.answer_validator import validate_answer
-from charts.builder import build_bq_style_chart
 from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
@@ -688,60 +687,6 @@ def _build_time_column_index(domain_meta: dict) -> dict[str, str]:
 
 DOMAIN_COLUMN_INDEX = _build_domain_column_index(DOMAIN_META)
 DOMAIN_TIME_INDEX = _build_time_column_index(DOMAIN_META)
-
-
-def annotate_output_fields(*, field_names: list[str], schema: list[dict], domain_meta: dict) -> list[dict]:
-    """
-    Label output fields using domain metadata.
-
-    Output shape (per field):
-    - name
-    - bq_type
-    - role: dimension|kpi|unknown
-    - dimension_type: time|categorical|None
-    - time_level: year|week|date|half_hour|program_airing|None
-    - semantic_tags (if known)
-    - business_description (if known)
-    """
-    schema_by_name = {f.get("name"): f for f in (schema or []) if isinstance(f, dict)}
-
-    annotated: list[dict] = []
-    for name in field_names:
-        # Prefer exact schema entry; fall back to case-insensitive search.
-        schema_entry = schema_by_name.get(name)
-        if schema_entry is None:
-            schema_entry = next(
-                (v for k, v in schema_by_name.items() if isinstance(k, str) and k.lower() == name.lower()),
-                None,
-            )
-
-        candidates = DOMAIN_COLUMN_INDEX.get(name.lower(), [])
-        role = "unknown"
-        if any(c.get("role") == "kpi" for c in candidates):
-            role = "kpi"
-        elif any(c.get("role") == "dimension" for c in candidates):
-            role = "dimension"
-
-        time_level = DOMAIN_TIME_INDEX.get(name.lower())
-        dimension_type = None
-        if role == "dimension":
-            dimension_type = "time" if time_level else "categorical"
-
-        best = candidates[0] if candidates else {}
-
-        annotated.append(
-            {
-                "name": name,
-                "bq_type": (schema_entry or {}).get("type"),
-                "role": role,
-                "dimension_type": dimension_type,
-                "time_level": time_level,
-                "semantic_tags": best.get("semantic_tags", []),
-                "business_description": best.get("business_description"),
-            }
-        )
-
-    return annotated
 
 
 def _bq_schema_to_json(schema) -> list[dict]:

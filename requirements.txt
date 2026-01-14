@@ -6,7 +6,5 @@ vertexai
 jsonschema
 markdown
 pytest
-pandas
-numpy
 jinja2
 requests
