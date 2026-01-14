@@ -356,9 +356,10 @@ def make_validate_filters(
     def validate_filters_impl(*, parsed_filters: dict, sql_blocks: list[dict], question: str, planner_text: str):
         f = parsed_filters["filters"]
         # IMPORTANT POLICY (simplified):
-        # - If the user did NOT specify region/target in the question, we do NOT apply those filters.
-        #   We force FILTERS.region/FILTERS.target to ALL (instead of failing), and also enforce
-        #   that SQL does not contain region/target predicates.
+        # - If the user did NOT specify region/target in the question, we APPLY selected defaults
+        #   from SELECTED_DEFAULT_DIMENSIONS (instead of using the no-filter sentinel).
+        # - If FILTERS indicates no-filter for region/target, SQL must not contain those predicates.
+        # - If FILTERS indicates a specific region/target, SQL must include the corresponding predicate.
         region = (f["region"]["value"] or "").strip()
         target = (f["target"]["value"] or "").strip()
         time_window = (f["time_window"]["value"] or "").strip()
@@ -389,22 +390,34 @@ def make_validate_filters(
             or re.search(r"\ball\s+hours\b|\b24x7\b|\b24\s*/\s*7\b", qtext)
         )
 
-        # Force region/target to ALL unless user specified them.
+        # Apply region/target defaults unless user specified them.
         default_notes: list[str] = []
-        if not user_specified_region and not _is_no_filter(region):
-            f["region"]["value"] = NO_FILTER_SENTINEL
-            region = NO_FILTER_SENTINEL
-            if selected_default_dimensions and "region" in selected_default_dimensions:
-                default_notes.append(
-                    f"Default Region (not applied): {selected_default_dimensions.get('region')}"
-                )
-        if not user_specified_target and not _is_no_filter(target):
-            f["target"]["value"] = NO_FILTER_SENTINEL
-            target = NO_FILTER_SENTINEL
-            if selected_default_dimensions and "target" in selected_default_dimensions:
-                default_notes.append(
-                    f"Default Target (not applied): {selected_default_dimensions.get('target')}"
-                )
+        if user_specified_region and _is_no_filter(region):
+            raise RuntimeError("User specified a region, but FILTERS region is not constrained")
+        if user_specified_target and _is_no_filter(target):
+            raise RuntimeError("User specified a target, but FILTERS target is not constrained")
+
+        if not user_specified_region and _is_no_filter(region):
+            chosen = (selected_default_dimensions or {}).get("region")
+            if chosen and not _is_no_filter(str(chosen)):
+                f["region"]["value"] = str(chosen)
+                region = str(chosen)
+                default_notes.append(f"Default Region (applied): {chosen}")
+            else:
+                f["region"]["value"] = NO_FILTER_SENTINEL
+                region = NO_FILTER_SENTINEL
+                default_notes.append("Default Region: (no filter)")
+
+        if not user_specified_target and _is_no_filter(target):
+            chosen = (selected_default_dimensions or {}).get("target")
+            if chosen and not _is_no_filter(str(chosen)):
+                f["target"]["value"] = str(chosen)
+                target = str(chosen)
+                default_notes.append(f"Default Target (applied): {chosen}")
+            else:
+                f["target"]["value"] = NO_FILTER_SENTINEL
+                target = NO_FILTER_SENTINEL
+                default_notes.append("Default Target: (no filter)")
 
         # Rebuild the user-visible list after any normalization.
         parsed_filters["filters_list"] = [
@@ -415,6 +428,22 @@ def make_validate_filters(
             s = (sql or "").lower()
             # handle backticks and optional project prefix
             return f"barc_slm_poc.{table}".lower() in s
+
+        def _sql_has_dim_filter(sql: str, col: str, value: str) -> bool:
+            s = sql or ""
+            v = (value or "").strip()
+            if not v:
+                return False
+            v_re = re.escape(v)
+            # Accept a few common patterns (case-insensitive):
+            # - col = 'X'
+            # - LOWER(col) = LOWER('X')
+            # - col IN ('X', ...)
+            return bool(
+                re.search(rf"\b{re.escape(col)}\b\s*=\s*'{v_re}'\b", s, flags=re.IGNORECASE)
+                or re.search(rf"\blower\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+                or re.search(rf"\b{re.escape(col)}\b\s+in\s*\(\s*'{v_re}'\b", s, flags=re.IGNORECASE)
+            )
 
         def _require_dead_hours_exclusion(sql: str):
             s = (sql or "").lower()
@@ -512,9 +541,16 @@ def make_validate_filters(
             if _is_no_filter(region):
                 if re.search(r"\bregion\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
                     raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
+            else:
+                if not _sql_has_dim_filter(sql, "region", region):
+                    raise RuntimeError(f"SQL is missing a region filter for FILTERS region={region}")
+
             if _is_no_filter(target):
                 if re.search(r"\btarget\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
                     raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
+            else:
+                if not _sql_has_dim_filter(sql, "target", target):
+                    raise RuntimeError(f"SQL is missing a target filter for FILTERS target={target}")
 
         # Validate non-ALL values are in allowed rows (column-wise)
         for col in ("genre", "region", "target", "channel"):
