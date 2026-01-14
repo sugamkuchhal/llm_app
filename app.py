@@ -10,6 +10,7 @@ import warnings
 import base64
 import datetime
 from decimal import Decimal
+from utils.logging_setup import configure_logging, set_request_id
 
 warnings.filterwarnings(
     "ignore",
@@ -34,20 +35,8 @@ from config.prompt_guard import assert_prompt_unchanged, hash_text
 import sys
 import logging
 
-root = logging.getLogger()
-root.setLevel(logging.INFO)
-
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(
-    logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-)
-
-# Prevent duplicate handlers
-if not root.handlers:
-    root.addHandler(handler)
-
-logging.getLogger("werkzeug").setLevel(logging.WARNING)
-
+# Centralized logging configuration (adds request_id to every line).
+configure_logging()
 logger = logging.getLogger("logger")
 logger.setLevel(logging.INFO)
 logger.propagate = True
@@ -1076,6 +1065,7 @@ def index():
     error = None
     question = None
     request_id = str(uuid.uuid4())
+    set_request_id(request_id)
 
     logger.info(
         "(%s) Request started | request_id=%s | limits={max_bq_bytes:%d,max_turns:%d,max_rows:%d}",
@@ -1167,6 +1157,7 @@ def index():
 
         except Exception as e:
             error = str(e)
+            logger.exception("Request failed | request_id=%s", request_id)
 
     return render_template_string(
         HTML,
