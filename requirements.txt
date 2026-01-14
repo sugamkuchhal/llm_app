@@ -9,13 +9,14 @@ pandas
 numpy
 jinja2
 requests
-re
 hashlib
 uuid
 logging
 json
 os
+-- re
 -- time
 -- gunicorn
+
 
 
