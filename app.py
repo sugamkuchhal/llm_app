@@ -384,6 +384,11 @@ def make_validate_filters(
             if not re.search(r"\b4\b.*\bweek", time_window.lower()):
                 raise RuntimeError("Time Window must default to Last 4 Weeks when user does not specify a time window")
 
+        def _sql_touches(sql: str, table: str) -> bool:
+            s = (sql or "").lower()
+            # handle backticks and optional project prefix
+            return f"barc_slm_poc.{table}".lower() in s
+
         # Dead-hours: exclude by default for time_band/program unless user explicitly includes.
         include_dead_hours = bool(
             re.search(r"\b(include|including|with)\s+dead\s+hours\b", qtext)
@@ -419,15 +424,13 @@ def make_validate_filters(
                 target = NO_FILTER_SENTINEL
                 default_notes.append("Default Target: (no filter)")
 
-        # Rebuild the user-visible list after any normalization.
-        parsed_filters["filters_list"] = [
-            f"{k}: {_display(f[k]['value'])}" for k in ["genre", "region", "target", "channel", "time_window"]
-        ] + default_notes
-
-        def _sql_touches(sql: str, table: str) -> bool:
-            s = (sql or "").lower()
-            # handle backticks and optional project prefix
-            return f"barc_slm_poc.{table}".lower() in s
+        # Decide whether dead-hours is relevant for display (only if the query touches those tables).
+        touches_dead_hours_tables = False
+        for qb in sql_blocks or []:
+            sql = qb.get("sql", "") or ""
+            if _sql_touches(sql, "time_band_table") or _sql_touches(sql, "program_table"):
+                touches_dead_hours_tables = True
+                break
 
         def _sql_has_dim_filter(sql: str, col: str, value: str) -> bool:
             s = sql or ""
@@ -443,6 +446,15 @@ def make_validate_filters(
                 re.search(rf"\b{re.escape(col)}\b\s*=\s*'{v_re}'\b", s, flags=re.IGNORECASE)
                 or re.search(rf"\blower\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
                 or re.search(rf"\b{re.escape(col)}\b\s+in\s*\(\s*'{v_re}'\b", s, flags=re.IGNORECASE)
+            )
+
+        # Rebuild the user-visible list after any normalization.
+        parsed_filters["filters_list"] = [
+            f"{k}: {_display(f[k]['value'])}" for k in ["genre", "region", "target", "channel", "time_window"]
+        ] + default_notes
+        if touches_dead_hours_tables:
+            parsed_filters["filters_list"].append(
+                "dead_hours: included" if include_dead_hours else "dead_hours: excluded (default)"
             )
 
         def _require_dead_hours_exclusion(sql: str):
