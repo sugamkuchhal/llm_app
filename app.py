@@ -334,6 +334,33 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
         f = parsed_filters["filters"]
         region = (f["region"]["value"] or "").strip()
         target = (f["target"]["value"] or "").strip()
+        time_window = (f["time_window"]["value"] or "").strip()
+
+        qtext = (question or "").lower()
+
+        def _user_specified_time_window(text: str) -> bool:
+            t = (text or "").lower()
+            # If user mentions a time window/date range, treat as specified.
+            return bool(
+                re.search(r"\b(last|latest|past)\s+\d+\s+(day|days|week|weeks)\b", t)
+                or re.search(r"\b(\d{4}-\d{2}-\d{2})\b", t)
+                or re.search(r"\bbetween\b.*\band\b", t)
+                or re.search(r"\bfrom\b.*\bto\b", t)
+                or re.search(r"\bweek_id\b|\bweek\s+\d+\b", t)
+            )
+
+        user_specified_time = _user_specified_time_window(qtext)
+
+        # If no time is specified by the user, time_window must default to last 4 weeks.
+        if not user_specified_time:
+            if not re.search(r"\b4\b.*\bweek", time_window.lower()):
+                raise RuntimeError("Time Window must default to Last 4 Weeks when user does not specify a time window")
+
+        # Dead-hours: exclude by default for time_band/program unless user explicitly includes.
+        include_dead_hours = bool(
+            re.search(r"\b(include|including|with)\s+dead\s+hours\b", qtext)
+            or re.search(r"\ball\s+hours\b|\b24x7\b|\b24\s*/\s*7\b", qtext)
+        )
 
         # Enforce "do not query region/target unless specified"
         if not user_specified_region and region.upper() != "ALL":
@@ -346,9 +373,104 @@ def make_validate_filters(*, allowed_rows: list[dict], candidates: list[dict], q
         if user_specified_target and target.upper() == "ALL":
             raise RuntimeError("User specified a target, but FILTERS sets target=ALL")
 
+        def _sql_touches(sql: str, table: str) -> bool:
+            s = (sql or "").lower()
+            # handle backticks and optional project prefix
+            return f"barc_slm_poc.{table}".lower() in s
+
+        def _require_dead_hours_exclusion(sql: str):
+            s = (sql or "").lower()
+            # Accept common forms.
+            ok = bool(
+                re.search(r"left\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*2\s*\)\s*not\s+in\s*\(", s)
+                or re.search(r"substr\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*1\s*,\s*2\s*\)\s*not\s+in\s*\(", s)
+            )
+            if not ok:
+                raise RuntimeError(
+                    "Missing dead-hours exclusion for time_band/program tables. "
+                    "Expected predicate like LEFT(time_band_half_hour, 2) NOT IN ('00','01','02','03','04','05')."
+                )
+
+        def _require_last_n_weeks_week_id(sql: str, n: int):
+            s = (sql or "").lower()
+            # Common pattern: LatestWeeks CTE selecting distinct week_id order by desc limit N
+            pat = rf"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+{n}\b"
+            if not re.search(pat, s):
+                raise RuntimeError(
+                    f"Missing 'latest {n} weeks' filter for channel_table (week_id). "
+                    f"Expected pattern selecting DISTINCT week_id ORDER BY week_id DESC LIMIT {n}."
+                )
+
+        def _require_last_n_weeks_date(sql: str, date_col: str, n: int):
+            s = (sql or "").lower()
+            # Accept either INTERVAL n WEEK or INTERVAL (n*7) DAY
+            days = n * 7
+            ok = bool(
+                re.search(rf"\b{re.escape(date_col.lower())}\b\s*>=\s*date_sub\(\s*current_date\(\)\s*,\s*interval\s*{n}\s*week\s*\)", s)
+                or re.search(rf"\b{re.escape(date_col.lower())}\b\s*>=\s*date_sub\(\s*current_date\(\)\s*,\s*interval\s*{days}\s*day\s*\)", s)
+            )
+            if not ok:
+                raise RuntimeError(
+                    f"Missing 'last {n} weeks' date filter on {date_col}. "
+                    f"Expected {date_col} >= DATE_SUB(CURRENT_DATE(), INTERVAL {n} WEEK) (or {days} DAY)."
+                )
+
+        def _require_some_date_filter(sql: str, date_col: str):
+            s = (sql or "").lower()
+            # Basic requirement: the date column is used with a comparison operator
+            ok = bool(re.search(rf"\b{re.escape(date_col.lower())}\b\s*(>=|>|between|in)\b", s))
+            if not ok:
+                raise RuntimeError(
+                    f"Missing date filter on {date_col} for an explicit user time window request."
+                )
+
+        # Parse time_window value best-effort for enforcement.
+        tw = time_window.lower()
+        m_weeks = re.search(r"\b(\d+)\s*week", tw)
+        n_weeks = int(m_weeks.group(1)) if m_weeks else None
+
         # SQL must not include region/target filters if FILTERS says ALL
         for qb in sql_blocks or []:
             sql = qb.get("sql", "") or ""
+            # Domain-specific time filters and dead-hours rules (BARC tables only)
+            touches_channel = _sql_touches(sql, "channel_table")
+            touches_time_band = _sql_touches(sql, "time_band_table")
+            touches_program = _sql_touches(sql, "program_table")
+
+            # Enforce last 4 weeks by default when user didn't specify.
+            if not user_specified_time:
+                # channel_table: use week_id latest 4
+                if touches_channel:
+                    _require_last_n_weeks_week_id(sql, 4)
+                # time_band/program: use date columns last 4 weeks
+                if touches_time_band:
+                    _require_last_n_weeks_date(sql, "time_band_date", 4)
+                if touches_program:
+                    _require_last_n_weeks_date(sql, "program_date", 4)
+            else:
+                # If user specified a time window, enforce something consistent.
+                if n_weeks is not None:
+                    if touches_channel:
+                        _require_last_n_weeks_week_id(sql, n_weeks)
+                    if touches_time_band:
+                        _require_last_n_weeks_date(sql, "time_band_date", n_weeks)
+                    if touches_program:
+                        _require_last_n_weeks_date(sql, "program_date", n_weeks)
+                else:
+                    # Unknown explicit window: require some filter on the correct date columns.
+                    if touches_time_band:
+                        _require_some_date_filter(sql, "time_band_date")
+                    if touches_program:
+                        _require_some_date_filter(sql, "program_date")
+                    if touches_channel:
+                        # Require any mention of week_id with a limiting pattern.
+                        if "week_id" not in sql.lower():
+                            raise RuntimeError("Missing week_id-based time filter for channel_table with explicit time request")
+
+            # Dead hours exclusion for time_band/program unless explicitly included
+            if (touches_time_band or touches_program) and not include_dead_hours:
+                _require_dead_hours_exclusion(sql)
+
             if region.upper() == "ALL":
                 if re.search(r"\bregion\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
                     raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
