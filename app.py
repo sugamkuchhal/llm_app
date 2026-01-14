@@ -144,7 +144,7 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "f8cf685f426bb36d2e48dafced4cbbb9ca551c3f6b4c5c2dd9ed7398cbc49c16"
+SYSTEM_PROMPT_HASH = "ab071d8a8cf06859cc5048f91a72ed12bc684f0e6ea92815863a5450def15486"
 PLANNER_PROMPT_HASH = "ce28b3fc8687ad1b98943ffe220ad0d3132db737bcb7f8fb42a78285a9e39d1d"
 
 assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
@@ -468,10 +468,16 @@ def make_validate_filters(
             # Accept a few common patterns (case-insensitive):
             # - col = 'X'
             # - LOWER(col) = LOWER('X')
+            # - UPPER(col) = UPPER('X')
+            # - TRIM(col) = 'X' (and combinations)
             # - col IN ('X', ...)
             return bool(
                 re.search(rf"\b{re.escape(col)}\b\s*=\s*'{v_re}'\b", s, flags=re.IGNORECASE)
                 or re.search(rf"\blower\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+                or re.search(rf"\bupper\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*upper\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+                or re.search(rf"\btrim\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*'{v_re}'\b", s, flags=re.IGNORECASE)
+                or re.search(rf"\bupper\s*\(\s*trim\s*\(\s*\b{re.escape(col)}\b\s*\)\s*\)\s*=\s*upper\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+                or re.search(rf"\blower\s*\(\s*trim\s*\(\s*\b{re.escape(col)}\b\s*\)\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
                 or re.search(rf"\b{re.escape(col)}\b\s+in\s*\(\s*'{v_re}'\b", s, flags=re.IGNORECASE)
             )
 

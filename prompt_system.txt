@@ -84,6 +84,7 @@ Rules:
   - time_window
 - If the user does not specify a dimension, use the SYSTEM-provided defaults (SYSTEM_DEFAULT_DIMENSIONS).
 - Only use "__NO_FILTER__" if there is truly no constraint and no default applies.
+- If a filter value is not "__NO_FILTER__", the SQL MUST include a matching constraint on the corresponding column (e.g., Region/Target/Channel/genre).
 - Do NOT omit the FILTERS block under any circumstances
 - It the filters are coming from defaults, please mention the same as well
 
