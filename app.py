@@ -166,13 +166,45 @@ def append_chat_turn(question, headline):
     session["chat_history"] = h[-MAX_TURNS:]
 
 def extract_metric_manifest(text: str):
+    """
+    Fail-fast extraction of the metric manifest.
+
+    Contract:
+    - Exactly one BEGIN_METRIC_MANIFEST and one END_METRIC_MANIFEST marker
+    - Content between markers must be a JSON array
+    """
+    begin = "BEGIN_METRIC_MANIFEST"
+    end = "END_METRIC_MANIFEST"
+
+    begin_count = text.count(begin)
+    end_count = text.count(end)
+    if begin_count != 1 or end_count != 1:
+        raise RuntimeError(
+            f"Invalid METRIC_MANIFEST markers: begin={begin_count}, end={end_count}"
+        )
+
+    begin_idx = text.find(begin)
+    end_idx = text.find(end)
+    if begin_idx == -1 or end_idx == -1 or end_idx <= begin_idx:
+        raise RuntimeError("Invalid METRIC_MANIFEST marker ordering")
+
+    block = text[begin_idx + len(begin):end_idx].strip()
+    logger.info("RAW METRIC_MANIFEST >>>\n%s\n<<< END METRIC_MANIFEST", block)
+
+    # Deterministic guard: the manifest must be a JSON array.
+    if not block.startswith("[") or not block.endswith("]"):
+        raise RuntimeError("METRIC_MANIFEST must be a JSON array")
+
     try:
-        block = text.split("BEGIN_METRIC_MANIFEST", 1)[1]
-        block = block.split("END_METRIC_MANIFEST", 1)[0]
-        logger.info("RAW METRIC_MANIFEST >>>\n%s\n<<< END METRIC_MANIFEST", block)
         return json.loads(block)
-    except Exception:
-        raise RuntimeError("Invalid or missing METRIC_MANIFEST block")
+    except json.JSONDecodeError as e:
+        # Include parse position for debuggability without attempting repair.
+        context_start = max(e.pos - 40, 0)
+        context_end = min(e.pos + 40, len(block))
+        context = block[context_start:context_end].replace("\n", "\\n")
+        raise RuntimeError(
+            f"Invalid METRIC_MANIFEST JSON at pos={e.pos}: {e.msg} | context='{context}'"
+        ) from e
 
 def validate_metric_sql_binding(metric_manifest, sql_blocks):
     """
