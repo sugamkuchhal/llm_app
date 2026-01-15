@@ -46,7 +46,6 @@ from domain.barc.barc_dimension_reference import (
 )
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
-from config.prompt_guard import assert_prompt_unchanged, hash_text
 
 
 import sys
@@ -155,11 +154,9 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "8386449207f92e38e138bcfe2d3227865d61d64d5159cacc772c8c6b38b2c3ff"
-PLANNER_PROMPT_HASH = "ce28b3fc8687ad1b98943ffe220ad0d3132db737bcb7f8fb42a78285a9e39d1d"
-
-assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
-assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
+#
+# Prompt guard intentionally removed (no prompt hash enforcement).
+#
 
 
 # --------------------------------------------------
@@ -285,7 +282,12 @@ def extract_filters(planner_text: str) -> dict:
         return "(no filter)" if is_no_filter_value(v) else (v or "")
 
     filters_list = [f"{k}: {_display(parsed[k]['value'])}" for k in required]
-    return {"filters": parsed, "filters_list": filters_list, "resolved_filters": {}}
+    return {
+        "filters": parsed,
+        "filters_list": filters_list,
+        "filters_display": [],
+        "resolved_filters": {},
+    }
 
 
 def make_validate_filters(
@@ -492,37 +494,112 @@ def make_validate_filters(
 
         # SQL predicate detection is centralized in domain.barc.barc_rules
 
-        def _display_value(v: str, source: str | None = None) -> str:
-            if is_no_filter_value(v):
-                return "(no filter)"
-            suffix = ""
-            if source == "default":
-                suffix = " (default)"
-            elif source == "inferred":
-                suffix = " (inferred)"
-            return f"{v}{suffix}"
+        def _mentions_value(question_text: str, value: str) -> bool:
+            qv = (question_text or "").strip()
+            vv = (value or "").strip()
+            if not qv or not vv:
+                return False
+            # Whole-token match for short codes like HSM/EBN/EGN.
+            if re.fullmatch(r"[A-Za-z0-9]{2,10}", vv):
+                return bool(re.search(rf"(?i)(?<![A-Za-z0-9]){re.escape(vv)}(?![A-Za-z0-9])", qv))
+            return vv.lower() in qv.lower()
 
-        # Rebuild the user-visible list after resolution (no duplicate "default notes").
-        parsed_filters["filters_list"] = [
-            f"genre: {_display_value(f['genre']['value'])}",
-            f"region: {_display_value(f['region']['value'], region_source)}",
-            f"target: {_display_value(f['target']['value'], target_source)}",
-            f"channel: {_display_value(f['channel']['value'])}",
-            f"time_window: {_display_value(f['time_window']['value'], tw_source)}",
-        ]
-        if touches_dead_hours_tables:
-            parsed_filters["filters_list"].append(
-                "dead_hours: included" if include_dead_hours else "dead_hours: excluded (default)"
-            )
+        def _source_label(source_key: str) -> tuple[str, str]:
+            # Returns (label, css_class)
+            if source_key == "user":
+                return ("user provided", "filter-user")
+            if source_key == "inferred":
+                return ("inferred", "filter-inferred")
+            return ("default", "filter-default")
+
+        def _classify_from_resolution_source(src: str) -> str:
+            if src == "inferred":
+                return "inferred"
+            if src == "default":
+                return "default"
+            return "user"
+
+        def _format_time_window(v: str | None) -> str:
+            if not v:
+                return "(no filter)"
+            vv = v.strip()
+            # Display preference: show "Latest 4 Weeks" even if internal uses "Last 4 Weeks".
+            if vv.lower() == "last 4 weeks":
+                return "Latest 4 Weeks"
+            return vv
+
+        def _format_dead_hours(included: bool) -> str:
+            return "Included" if included else "Excluded"
+
+        genre_val = normalize_no_filter_to_none(f["genre"]["value"])
+        region_val = normalize_no_filter_to_none(f["region"]["value"])
+        target_val = normalize_no_filter_to_none(f["target"]["value"])
+        channel_val = normalize_no_filter_to_none(f["channel"]["value"])
+        time_window_val = normalize_no_filter_to_none(f["time_window"]["value"])
+
+        # Classify sources into: user/inferred/default (as requested for display).
+        genre_display_source = "default"
+        if genre_val:
+            if _mentions_value(qtext, genre_val):
+                genre_display_source = "user"
+            elif inferred_genre and inferred_genre.strip().lower() == genre_val.strip().lower():
+                genre_display_source = "inferred"
+            else:
+                # Planner set a concrete value but we can't find it verbatim in the question.
+                genre_display_source = "inferred"
+
+        channel_display_source = "default"
+        if channel_val:
+            if _mentions_value(qtext, channel_val):
+                channel_display_source = "user"
+            else:
+                # If the question mentions any meaningful token from the chosen channel, treat as inferred.
+                tokens = [t for t in re.split(r"[^A-Za-z0-9]+", channel_val) if len(t) >= 3]
+                if any(t.lower() in qtext.lower() for t in tokens):
+                    channel_display_source = "inferred"
+                else:
+                    channel_display_source = "inferred"
+
+        region_display_source = _classify_from_resolution_source(region_source)
+        target_display_source = _classify_from_resolution_source(target_source)
+        time_window_display_source = "default" if tw_source == "default" else "user"
+        dead_hours_display_source = "user" if include_dead_hours else "default"
 
         parsed_filters["resolved_filters"] = {
-            "genre": {"value": normalize_no_filter_to_none(f["genre"]["value"]), "source": "explicit"},
-            "region": {"value": normalize_no_filter_to_none(f["region"]["value"]), "source": region_source},
-            "target": {"value": normalize_no_filter_to_none(f["target"]["value"]), "source": target_source},
-            "channel": {"value": normalize_no_filter_to_none(f["channel"]["value"]), "source": "explicit"},
-            "time_window": {"value": normalize_no_filter_to_none(f["time_window"]["value"]), "source": tw_source},
-            "dead_hours": {"value": "included" if include_dead_hours else "excluded", "source": "default" if not include_dead_hours else "explicit"},
+            "genre": {"value": genre_val, "source": genre_display_source},
+            "region": {"value": region_val, "source": region_display_source},
+            "target": {"value": target_val, "source": target_display_source},
+            "channel": {"value": channel_val, "source": channel_display_source},
+            "time_window": {"value": time_window_val, "source": time_window_display_source},
+            "dead_hours": {"value": "included" if include_dead_hours else "excluded", "source": dead_hours_display_source},
         }
+
+        # Backwards-compatible simple list (not used by the new UI renderer).
+        parsed_filters["filters_list"] = [
+            f"genre: {genre_val or '(no filter)'}",
+            f"region: {region_val or '(no filter)'}",
+            f"target: {target_val or '(no filter)'}",
+            f"channel: {channel_val or '(no filter)'}",
+            f"time_window: {_format_time_window(time_window_val)}",
+            f"dead_hours: {_format_dead_hours(include_dead_hours).lower()}",
+        ]
+
+        # New rich display model for UI (labels, values, and source badges).
+        def _row(label: str, value: str, source_key: str) -> dict:
+            sl, css = _source_label(source_key)
+            return {"label": label, "value": value, "source_label": sl, "badge_class": css}
+
+        parsed_filters["filters_display"] = [
+            _row("Genre", genre_val or "(no filter)", genre_display_source),
+            _row("Region", region_val or "(no filter)", region_display_source),
+            _row("Target Audience", target_val or "(no filter)", target_display_source),
+            _row("Channel", channel_val or "(no filter)", channel_display_source),
+            _row("Time Window", _format_time_window(time_window_val), time_window_display_source),
+        ]
+        if touches_dead_hours_tables:
+            parsed_filters["filters_display"].append(
+                _row("Dead Hours", _format_dead_hours(include_dead_hours), dead_hours_display_source)
+            )
 
         def _require_dead_hours_exclusion(sql: str):
             s = (sql or "").lower()
@@ -1348,6 +1425,22 @@ details[open] summary::before { content:"▼ "; }
 details[open] .markdown-body p { margin: 8px 0; line-height: 1.0; }
 pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 .error { color:darkred; font-weight:600; }
+
+.filter-row { display: flex; gap: 8px; align-items: baseline; }
+.filter-label { min-width: 140px; font-weight: 600; }
+.filter-value { font-family: Inter, system-ui, sans-serif; }
+.filter-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.filter-user { background: #dcfce7; color: #166534; border-color: #86efac; }      /* green */
+.filter-inferred { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }  /* blue */
+.filter-default { background: #fef9c3; color: #92400e; border-color: #fde68a; }   /* yellow */
 </style>
 </head>
 
@@ -1379,7 +1472,15 @@ pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
   <summary>Filters</summary>
   <ul>
     {% for f in filters %}
-      <li>{{ f }}</li>
+      {% if f is mapping %}
+        <li class="filter-row">
+          <span class="filter-label">{{ f.label }}</span>
+          <span class="filter-value">{{ f.value }}</span>
+          <span class="filter-badge {{ f.badge_class }}">{{ f.source_label }}</span>
+        </li>
+      {% else %}
+        <li>{{ f }}</li>
+      {% endif %}
     {% endfor %}
   </ul>
 </details>

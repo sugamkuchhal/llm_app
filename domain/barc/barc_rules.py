@@ -107,12 +107,12 @@ def infer_user_specified_region_target(
     region_match = _contains_any(cand_regions)
     target_match = _contains_any(cand_targets)
 
-    # If a region token is used in a clear locative phrase, treat as explicit region.
-    if region_match and re.search(
-        rf"(?i)\b(in|within|across|for)\s+{re.escape(region_match)}\b",
-        q,
-    ):
-        region_hint = True
+    # If a region token is used in a clear locative phrase, treat as explicit region,
+    # EXCEPT when the token is also the inferred genre code (HSM/EBN/etc.). In that
+    # ambiguous case we only treat it as region if the user explicitly says region/market.
+    if region_match and re.search(rf"(?i)\b(in|within|across|for)\s+{re.escape(region_match)}\b", q):
+        if not (inferred_genre and region_match.strip().lower() == inferred_genre.strip().lower()):
+            region_hint = True
 
     # Disambiguate genre-like codes (HSM/EBN/HBN v1/etc.) being treated as a region.
     if (
