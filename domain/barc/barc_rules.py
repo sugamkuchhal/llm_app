@@ -62,7 +62,8 @@ def _token_in_question(question: str, token: str) -> bool:
         return False
 
     # Use whole-token match for compact alphanumerics (reduces accidental matches).
-    if re.fullmatch(r"[A-Za-z0-9]{2,6}", t):
+    # Allow slightly longer codes too (e.g. FACTUAL).
+    if re.fullmatch(r"[A-Za-z0-9]{2,10}", t):
         return bool(re.search(rf"(?i)(?<![A-Za-z0-9]){re.escape(t)}(?![A-Za-z0-9])", q))
 
     return t.lower() in q.lower()

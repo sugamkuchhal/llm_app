@@ -37,6 +37,18 @@ class TestBarcFilterResolution(unittest.TestCase):
         self.assertTrue(region)
         self.assertFalse(target)
 
+    def test_infer_user_specified_region_disambiguates_factual_code(self):
+        candidates = [
+            {"region": "FACTUAL", "target": "NCCS All 15+"},
+        ]
+        region, target = infer_user_specified_region_target(
+            question="factual performance FACTUAL",
+            candidates=candidates,
+            inferred_genre="FACTUAL",
+        )
+        self.assertFalse(region)
+        self.assertFalse(target)
+
     def test_resolve_time_window_defaults_when_user_did_not_specify(self):
         value, source = resolve_time_window_value(
             planner_value=NO_FILTER_SENTINEL,
