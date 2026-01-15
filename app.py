@@ -116,38 +116,15 @@ app.secret_key = SECRET_KEY
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --------------------------------------------------
-# Helpers
+# Domain assets (via adapter)
 # --------------------------------------------------
-def load_file(path):
-    """
-    Deterministic file loader:
-    - UTF-8 (strict)
-    - stable newlines (normalize to \\n)
-    """
-    full_path = os.path.join(BASE_DIR, path)
-    try:
-        with open(full_path, "r", encoding="utf-8", errors="strict") as f:
-            # Note: Python's text mode already does universal newlines, but we
-            # normalize explicitly for hash stability across environments.
-            text = f.read()
-    except OSError as e:
-        raise RuntimeError(f"Failed to read file: {full_path}") from e
-
-    return text.replace("\r\n", "\n").replace("\r", "\n")
-
-DOMAIN = "barc"
-
-SYSTEM_PROMPT = load_file("prompt_system.txt")
-INTERPRETER_PROMPT = load_file("prompt_interpreter.txt")
-ANSWER_CONTRACT = load_file("contract_answer.json")
-
-PLANNER_PROMPT = load_file(f"domain/{DOMAIN}/{DOMAIN}_context_planner.txt")
-META_DATA = load_file(f"domain/{DOMAIN}/{DOMAIN}_meta.json")
-
-try:
-    DOMAIN_META = json.loads(META_DATA)
-except json.JSONDecodeError as e:
-    raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
+ASSETS = domain_adapter.load_domain_assets()
+SYSTEM_PROMPT = ASSETS["system_prompt"]
+INTERPRETER_PROMPT = ASSETS["interpreter_prompt"]
+ANSWER_CONTRACT = ASSETS["answer_contract"]
+PLANNER_PROMPT = ASSETS["planner_prompt"]
+META_DATA = ASSETS["metadata_text"]
+DOMAIN_META = ASSETS["domain_meta"]
 
 #
 # Prompt guard intentionally removed (no prompt hash enforcement).
@@ -1642,56 +1619,22 @@ def index():
             planner_model, interpreter_model = get_models()
             _log_phase(phase="init", event="end", request_id=request_id)
 
-            _log_phase(phase="dimensions.default_rows", event="start", request_id=request_id)
-            default_rows = domain_adapter.fetch_default_dimension_rows(
-                bq_client=bq_client,
-                limit=(
-                    None
-                    if os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100").strip().lower()
-                    in {"infinite", "all", "none", "unlimited", "0", "-1"}
-                    else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
-                ),
-            )
+            _log_phase(phase="dimensions.context", event="start", request_id=request_id)
+            dim_ctx = domain_adapter.build_dimension_context(bq_client=bq_client, question=question)
+            default_rows = dim_ctx.get("default_rows") or []
+            candidates = dim_ctx.get("candidates") or []
+            allowed_rows = dim_ctx.get("allowed_rows") or []
+            selected_default = dim_ctx.get("selected_default_dimensions")
             _log_phase(
-                phase="dimensions.default_rows",
+                phase="dimensions.context",
                 event="end",
                 request_id=request_id,
-                extra={"count": len(default_rows or [])},
-            )
-
-            _log_phase(phase="dimensions.candidates", event="start", request_id=request_id)
-            candidates = domain_adapter.fetch_candidate_dimension_rows_for_question(
-                bq_client=bq_client,
-                question=question,
-                limit=int(os.getenv("DIMENSION_CANDIDATES_LIMIT", "200")),
-            )
-            _log_phase(
-                phase="dimensions.candidates",
-                event="end",
-                request_id=request_id,
-                extra={"count": len(candidates or [])},
-            )
-
-            _log_phase(phase="dimensions.merge", event="start", request_id=request_id)
-            allowed_rows = domain_adapter.merge_dimension_rows(candidates, default_rows)
-            _log_phase(
-                phase="dimensions.merge",
-                event="end",
-                request_id=request_id,
-                extra={"count": len(allowed_rows or [])},
-            )
-
-            _log_phase(phase="dimensions.select_default", event="start", request_id=request_id)
-            selected_default = domain_adapter.pick_selected_default_row(
-                question=question,
-                # Defaults must come strictly from is_default=TRUE curated rows.
-                default_rows=default_rows,
-            )
-            _log_phase(
-                phase="dimensions.select_default",
-                event="end",
-                request_id=request_id,
-                extra={"selected_default_dimensions": selected_default},
+                extra={
+                    "default_rows": len(default_rows),
+                    "candidates": len(candidates),
+                    "allowed_rows": len(allowed_rows),
+                    "selected_default_dimensions": selected_default,
+                },
             )
 
             _log_phase(phase="pipeline.run_analysis", event="start", request_id=request_id)
