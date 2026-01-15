@@ -1217,6 +1217,9 @@ def _normalize_bq_rows(rows: list[dict]) -> list[dict]:
 
 
 def run_all_bigquery(queries):
+    # `run_analysis()` calls this function without passing a client.
+    # Always use the lazily-initialized global client.
+    bq_client = get_bq_client()
     results = []
 
     for q in queries:
