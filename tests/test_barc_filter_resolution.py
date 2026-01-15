@@ -6,6 +6,7 @@ from domain.barc.barc_rules import (
     infer_user_specified_region_target,
     resolve_time_window_value,
     choose_default_with_constraints,
+    sql_has_dim_filter,
 )
 
 
@@ -78,6 +79,10 @@ class TestBarcFilterResolution(unittest.TestCase):
         )
         self.assertEqual(chosen, "HSM")
         self.assertEqual(src, "inferred")
+
+    def test_sql_has_dim_filter_matches_simple_equals(self):
+        sql = "SELECT * FROM t WHERE Region = 'HSM' AND Target = 'X'"
+        self.assertTrue(sql_has_dim_filter(sql, col="region", value="HSM"))
 
 
 if __name__ == "__main__":

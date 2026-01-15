@@ -206,3 +206,43 @@ def has_dead_hours_filter(planner_text: str) -> bool:
     Indicates whether dead hours exclusion is expected.
     """
     return "dead hours" in planner_text.lower()
+
+
+def sql_has_dim_filter(sql: str, *, col: str, value: str) -> bool:
+    """
+    Best-effort detection that SQL constrains a dimension column to a value.
+
+    Important: do NOT use a trailing word-boundary after the closing quote
+    (e.g. `='HSM'\\b`) because `'` is not a word character and it causes false
+    negatives depending on following whitespace/newlines.
+    """
+    s = sql or ""
+    v = (value or "").strip()
+    if not v:
+        return False
+    v_re = re.escape(v)
+    c = re.escape(col)
+
+    return bool(
+        re.search(rf"\b{c}\b\s*=\s*'{v_re}'", s, flags=re.IGNORECASE)
+        or re.search(rf"\blower\s*\(\s*\b{c}\b\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+        or re.search(rf"\bupper\s*\(\s*\b{c}\b\s*\)\s*=\s*upper\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+        or re.search(rf"\btrim\s*\(\s*\b{c}\b\s*\)\s*=\s*'{v_re}'", s, flags=re.IGNORECASE)
+        or re.search(rf"\bupper\s*\(\s*trim\s*\(\s*\b{c}\b\s*\)\s*\)\s*=\s*upper\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+        or re.search(rf"\blower\s*\(\s*trim\s*\(\s*\b{c}\b\s*\)\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
+        or re.search(rf"\b{c}\b\s+in\s*\(\s*'{v_re}'", s, flags=re.IGNORECASE)
+    )
+
+
+def sql_has_any_dim_predicate(sql: str, *, col: str) -> bool:
+    """
+    Best-effort detection that SQL has *any* predicate on a dimension column.
+    Used to assert "no region/target filter should exist".
+    """
+    s = sql or ""
+    c = re.escape(col)
+    return bool(
+        re.search(rf"\b{c}\b\s*=\s*'[^']+'", s, flags=re.IGNORECASE)
+        or re.search(rf"\b{c}\b\s+in\s*\(", s, flags=re.IGNORECASE)
+        or re.search(rf"\b(lower|upper|trim)\s*\(\s*[\w\.\s]*\b{c}\b[\w\.\s]*\)\s*(=|in)\b", s, flags=re.IGNORECASE)
+    )
