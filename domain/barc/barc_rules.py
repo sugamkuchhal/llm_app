@@ -169,12 +169,30 @@ def choose_default_with_constraints(
         if ok:
             rows.append(r)
 
-    # If the default exists within constrained rows, use it.
+    # STRICT DEFAULT RULE:
+    # "default" means it comes from rows where is_default == True.
+    default_rows = [
+        r
+        for r in rows
+        if isinstance(r, dict) and bool(r.get("is_default")) is True
+    ]
+
+    # If the desired default exists within constrained DEFAULT rows, use it.
     if desired:
-        for r in rows:
+        for r in default_rows:
             rv = normalize_no_filter_to_none(r.get(dim))
             if rv and rv.strip().lower() == desired.strip().lower():
                 return (rv, "default")
+
+    # If constrained DEFAULT rows imply a single value, use it (default).
+    uniq_default = {normalize_no_filter_to_none(r.get(dim)) for r in default_rows}
+    uniq_default = {u for u in uniq_default if u}
+    if len(uniq_default) == 1:
+        return (sorted(uniq_default)[0], "default")
+
+    # If there are multiple default candidates, pick deterministically.
+    if len(uniq_default) > 1:
+        return (sorted(uniq_default)[0], "default")
 
     # If constrained rows imply a single value, use it (inferred).
     uniq = {

@@ -1638,7 +1638,8 @@ def index():
             allowed_rows = merge_dimension_rows(candidates, default_rows)
             selected_default = pick_selected_default_row(
                 question=question,
-                default_rows=(candidates or default_rows),
+                # Defaults must come strictly from is_default=TRUE curated rows.
+                default_rows=default_rows,
             )
 
             result = run_analysis(
