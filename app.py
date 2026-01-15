@@ -9,6 +9,7 @@ import uuid
 import warnings
 import base64
 import datetime
+import time
 from decimal import Decimal
 from utils.logging_setup import configure_logging, set_request_id, get_log_buffer
 
@@ -25,25 +26,7 @@ from vertexai.preview.generative_models import GenerativeModel
 from validators.answer_validator import validate_answer
 from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
-from domain.barc.barc_validation import shadow_resolve_dimensions_bq
-from domain.barc.barc_mappings import resolve_genre
-from domain.barc.barc_rules import (
-    NO_FILTER_SENTINEL,
-    is_no_filter_value,
-    normalize_no_filter_to_none,
-    infer_user_specified_region_target,
-    resolve_time_window_value,
-    infer_include_dead_hours,
-    choose_default_with_constraints,
-    sql_has_any_dim_predicate,
-    sql_has_dim_filter,
-)
-from domain.barc.barc_dimension_reference import (
-    fetch_default_dimension_rows,
-    fetch_candidate_dimension_rows_for_question,
-    merge_dimension_rows,
-    pick_selected_default_row,
-)
+from domain.barc import barc_adapter as domain_adapter
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
 
@@ -56,6 +39,18 @@ configure_logging()
 logger = logging.getLogger("logger")
 logger.setLevel(logging.INFO)
 logger.propagate = True
+
+
+def _utc_ts() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _log_phase(*, phase: str, event: str, request_id: str, extra: dict | None = None):
+    payload = {"ts": _utc_ts(), "phase": phase, "event": event, "request_id": request_id}
+    if extra:
+        payload.update(extra)
+    # Keep the log line JSON-friendly for downstream parsing.
+    logger.info("PHASE_EVENT %s", json.dumps(payload, sort_keys=True))
 
 
 # --------------------------------------------------
@@ -279,7 +274,7 @@ def extract_filters(planner_text: str) -> dict:
         raise RuntimeError(f"FILTERS block missing required keys: {missing}")
 
     def _display(v: str) -> str:
-        return "(no filter)" if is_no_filter_value(v) else (v or "")
+        return "(no filter)" if domain_adapter.is_no_filter_value(v) else (v or "")
 
     filters_list = [f"{k}: {_display(parsed[k]['value'])}" for k in required]
     return {
@@ -399,11 +394,11 @@ def make_validate_filters(
             return f"barc_slm_poc.{table}".lower() in s
 
         # Dead-hours: exclude by default for time_band/program unless user explicitly includes.
-        include_dead_hours = infer_include_dead_hours(qtext)
+        include_dead_hours = domain_adapter.infer_include_dead_hours(qtext)
 
         # Heuristic correction: prevent genre codes being placed in region (common LLM slip).
-        inferred_genre = resolve_genre(question)
-        user_specified_region, user_specified_target = infer_user_specified_region_target(
+        inferred_genre = domain_adapter.resolve_genre(question)
+        user_specified_region, user_specified_target = domain_adapter.infer_user_specified_region_target(
             question=qtext,
             candidates=candidates,
             inferred_genre=inferred_genre,
@@ -412,14 +407,14 @@ def make_validate_filters(
         if (
             inferred_genre
             and not user_specified_region
-            and not is_no_filter_value(region)
+            and not domain_adapter.is_no_filter_value(region)
             and (region or "").strip().lower() == inferred_genre.strip().lower()
-            and is_no_filter_value(genre)
+            and domain_adapter.is_no_filter_value(genre)
         ):
             f["genre"]["value"] = inferred_genre
             genre = inferred_genre
-            f["region"]["value"] = NO_FILTER_SENTINEL
-            region = NO_FILTER_SENTINEL
+            f["region"]["value"] = domain_adapter.NO_FILTER_SENTINEL
+            region = domain_adapter.NO_FILTER_SENTINEL
 
         # Resolve time_window.
         # Policy:
@@ -429,8 +424,8 @@ def make_validate_filters(
         if not user_specified_time:
             resolved_tw, tw_source = ("Last 4 Weeks", "default")
         else:
-            resolved_tw, tw_source = resolve_time_window_value(planner_value=time_window, question=qtext)
-            if resolved_tw == NO_FILTER_SENTINEL:
+            resolved_tw, tw_source = domain_adapter.resolve_time_window_value(planner_value=time_window, question=qtext)
+            if resolved_tw == domain_adapter.NO_FILTER_SENTINEL:
                 raise RuntimeError("User specified a time window, but FILTERS time_window is not constrained")
 
         f["time_window"]["value"] = resolved_tw
@@ -440,19 +435,19 @@ def make_validate_filters(
         region_source = "explicit"
         target_source = "explicit"
 
-        if user_specified_region and is_no_filter_value(region):
+        if user_specified_region and domain_adapter.is_no_filter_value(region):
             raise RuntimeError("User specified a region, but FILTERS region is not constrained")
-        if user_specified_target and is_no_filter_value(target):
+        if user_specified_target and domain_adapter.is_no_filter_value(target):
             raise RuntimeError("User specified a target, but FILTERS target is not constrained")
 
-        genre_norm = normalize_no_filter_to_none(genre)
-        channel_norm = normalize_no_filter_to_none(channel)
-        target_norm = normalize_no_filter_to_none(target)
+        genre_norm = domain_adapter.normalize_no_filter_to_none(genre)
+        channel_norm = domain_adapter.normalize_no_filter_to_none(channel)
+        target_norm = domain_adapter.normalize_no_filter_to_none(target)
 
         # If user did NOT specify region, we always apply SYSTEM defaults/inference,
         # even if the planner filled a region value (to avoid HSM/EBN ambiguity drift).
         if not user_specified_region:
-            chosen, src = choose_default_with_constraints(
+            chosen, src = domain_adapter.choose_default_with_constraints(
                 dim="region",
                 selected_default_dimensions=selected_default_dimensions,
                 allowed_rows=allowed_rows,
@@ -463,16 +458,16 @@ def make_validate_filters(
                 },
             )
             region_source = src
-            f["region"]["value"] = chosen or NO_FILTER_SENTINEL
+            f["region"]["value"] = chosen or domain_adapter.NO_FILTER_SENTINEL
             region = f["region"]["value"]
         else:
             region_source = "explicit"
 
-        region_norm = normalize_no_filter_to_none(region)
+        region_norm = domain_adapter.normalize_no_filter_to_none(region)
 
         # Same policy for target: if user did NOT specify it, force defaults/inference.
         if not user_specified_target:
-            chosen, src = choose_default_with_constraints(
+            chosen, src = domain_adapter.choose_default_with_constraints(
                 dim="target",
                 selected_default_dimensions=selected_default_dimensions,
                 allowed_rows=allowed_rows,
@@ -483,7 +478,7 @@ def make_validate_filters(
                 },
             )
             target_source = src
-            f["target"]["value"] = chosen or NO_FILTER_SENTINEL
+            f["target"]["value"] = chosen or domain_adapter.NO_FILTER_SENTINEL
             target = f["target"]["value"]
         else:
             target_source = "explicit"
@@ -535,11 +530,11 @@ def make_validate_filters(
         def _format_dead_hours(included: bool) -> str:
             return "Included" if included else "Excluded"
 
-        genre_val = normalize_no_filter_to_none(f["genre"]["value"])
-        region_val = normalize_no_filter_to_none(f["region"]["value"])
-        target_val = normalize_no_filter_to_none(f["target"]["value"])
-        channel_val = normalize_no_filter_to_none(f["channel"]["value"])
-        time_window_val = normalize_no_filter_to_none(f["time_window"]["value"])
+        genre_val = domain_adapter.normalize_no_filter_to_none(f["genre"]["value"])
+        region_val = domain_adapter.normalize_no_filter_to_none(f["region"]["value"])
+        target_val = domain_adapter.normalize_no_filter_to_none(f["target"]["value"])
+        channel_val = domain_adapter.normalize_no_filter_to_none(f["channel"]["value"])
+        time_window_val = domain_adapter.normalize_no_filter_to_none(f["time_window"]["value"])
 
         # Classify sources into: user/inferred/default (as requested for display).
         genre_display_source = "default"
@@ -721,27 +716,27 @@ def make_validate_filters(
             if (touches_time_band or touches_program) and not include_dead_hours:
                 _require_dead_hours_exclusion(sql)
 
-            resolved_region = normalize_no_filter_to_none(region)
-            resolved_target = normalize_no_filter_to_none(target)
+            resolved_region = domain_adapter.normalize_no_filter_to_none(region)
+            resolved_target = domain_adapter.normalize_no_filter_to_none(target)
 
             if resolved_region is None:
-                if sql_has_any_dim_predicate(sql, col="region"):
+                if domain_adapter.sql_has_any_dim_predicate(sql, col="region"):
                     raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
             else:
-                if not sql_has_dim_filter(sql, col="region", value=resolved_region):
+                if not domain_adapter.sql_has_dim_filter(sql, col="region", value=resolved_region):
                     raise RuntimeError(f"SQL is missing a region filter for FILTERS region={resolved_region}")
 
             if resolved_target is None:
-                if sql_has_any_dim_predicate(sql, col="target"):
+                if domain_adapter.sql_has_any_dim_predicate(sql, col="target"):
                     raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
             else:
-                if not sql_has_dim_filter(sql, col="target", value=resolved_target):
+                if not domain_adapter.sql_has_dim_filter(sql, col="target", value=resolved_target):
                     raise RuntimeError(f"SQL is missing a target filter for FILTERS target={resolved_target}")
 
         # Validate non-ALL values are in allowed rows (column-wise)
         for col in ("genre", "region", "target", "channel"):
             val = (f[col]["value"] or "").strip()
-            if is_no_filter_value(val):
+            if domain_adapter.is_no_filter_value(val):
                 continue
             if val.lower() not in allowed_by_col.get(col, set()):
                 raise RuntimeError(
@@ -753,7 +748,7 @@ def make_validate_filters(
         r = (f["region"]["value"] or "").strip()
         t = (f["target"]["value"] or "").strip()
         c = (f["channel"]["value"] or "").strip()
-        if all(x and not is_no_filter_value(x) for x in (g, r, t, c)):
+        if all(x and not domain_adapter.is_no_filter_value(x) for x in (g, r, t, c)):
             if not _tuple_exists(g, r, t, c):
                 suggestion = _suggest_tuple(g, r, t, c)
                 raise RuntimeError(
@@ -1308,6 +1303,12 @@ def run_all_bigquery(queries):
         sql = q.get("sql", "")
         output_schema = q.get("output_schema")
         try:
+            t0 = time.perf_counter()
+            logger.info(
+                "BQ_QUERY event=start ts=%s metric_index=%s",
+                _utc_ts(),
+                metric_index,
+            )
             if not isinstance(output_schema, list) or not output_schema:
                 raise RuntimeError(f"Missing OUTPUT_SCHEMA for query #{metric_index}")
 
@@ -1386,7 +1387,24 @@ def run_all_bigquery(queries):
                 "field_info": field_info,
                 "output_schema": output_schema,
             })
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            logger.info(
+                "BQ_QUERY event=end ts=%s metric_index=%s duration_ms=%s bytes_processed=%s rows=%s",
+                _utc_ts(),
+                metric_index,
+                dur_ms,
+                getattr(dry_job, "total_bytes_processed", None),
+                len(rows),
+            )
         except Exception as e:
+            dur_ms = int((time.perf_counter() - t0) * 1000) if "t0" in locals() else None
+            logger.error(
+                "BQ_QUERY event=error ts=%s metric_index=%s duration_ms=%s error=%s",
+                _utc_ts(),
+                metric_index,
+                dur_ms,
+                str(e),
+            )
             logger.exception("BigQuery execution failed | metric_index=%s", metric_index)
             raise RuntimeError(
                 f"BigQuery execution failed for query #{metric_index}: {e}"
@@ -1615,13 +1633,17 @@ def index():
     if request.method == "POST":
         try:
             question = request.form["question"]  # ✅ FIX
+            _log_phase(phase="request", event="start", request_id=request_id, extra={"method": request.method})
 
             # Lazily initialize clients/models so the container can start even if
             # credentials aren't available during import time.
+            _log_phase(phase="init", event="start", request_id=request_id)
             bq_client = get_bq_client()
             planner_model, interpreter_model = get_models()
+            _log_phase(phase="init", event="end", request_id=request_id)
 
-            default_rows = fetch_default_dimension_rows(
+            _log_phase(phase="dimensions.default_rows", event="start", request_id=request_id)
+            default_rows = domain_adapter.fetch_default_dimension_rows(
                 bq_client=bq_client,
                 limit=(
                     None
@@ -1630,18 +1652,49 @@ def index():
                     else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
                 ),
             )
-            candidates = fetch_candidate_dimension_rows_for_question(
+            _log_phase(
+                phase="dimensions.default_rows",
+                event="end",
+                request_id=request_id,
+                extra={"count": len(default_rows or [])},
+            )
+
+            _log_phase(phase="dimensions.candidates", event="start", request_id=request_id)
+            candidates = domain_adapter.fetch_candidate_dimension_rows_for_question(
                 bq_client=bq_client,
                 question=question,
                 limit=int(os.getenv("DIMENSION_CANDIDATES_LIMIT", "200")),
             )
-            allowed_rows = merge_dimension_rows(candidates, default_rows)
-            selected_default = pick_selected_default_row(
+            _log_phase(
+                phase="dimensions.candidates",
+                event="end",
+                request_id=request_id,
+                extra={"count": len(candidates or [])},
+            )
+
+            _log_phase(phase="dimensions.merge", event="start", request_id=request_id)
+            allowed_rows = domain_adapter.merge_dimension_rows(candidates, default_rows)
+            _log_phase(
+                phase="dimensions.merge",
+                event="end",
+                request_id=request_id,
+                extra={"count": len(allowed_rows or [])},
+            )
+
+            _log_phase(phase="dimensions.select_default", event="start", request_id=request_id)
+            selected_default = domain_adapter.pick_selected_default_row(
                 question=question,
                 # Defaults must come strictly from is_default=TRUE curated rows.
                 default_rows=default_rows,
             )
+            _log_phase(
+                phase="dimensions.select_default",
+                event="end",
+                request_id=request_id,
+                extra={"selected_default_dimensions": selected_default},
+            )
 
+            _log_phase(phase="pipeline.run_analysis", event="start", request_id=request_id)
             result = run_analysis(
                 question=question,
                 session=session,
@@ -1679,6 +1732,7 @@ def index():
                 get_chat_history=get_chat_history,
                 append_chat_turn=append_chat_turn
             )
+            _log_phase(phase="pipeline.run_analysis", event="end", request_id=request_id)
             
             planner_text = result["planner_text"]
             filters = result["filters"]
@@ -1689,13 +1743,15 @@ def index():
             resolved_target = (resolved_filters.get("target") or {}).get("value")
             resolved_channel = (resolved_filters.get("channel") or {}).get("value")
             
-            shadow_dims = shadow_resolve_dimensions_bq(
+            _log_phase(phase="shadow_dimensions", event="start", request_id=request_id)
+            shadow_dims = domain_adapter.shadow_resolve_dimensions_bq(
                 bq_client=bq_client,
                 genre=resolved_genre,
                 region=resolved_region,
                 target=resolved_target,
                 channel=resolved_channel
             )
+            _log_phase(phase="shadow_dimensions", event="end", request_id=request_id, extra={"shadow_dims": shadow_dims})
             
             logger.info(
                 "SHADOW_DIMENSION_COMPARE | planner=%s | db=%s | match=%s",
@@ -1716,11 +1772,15 @@ def index():
             core_answer = result["validated_answer"]
             metric_payload = result["metric_payload"]
 
-#            answer = build_ui_answer(core_answer, metric_payload)
+            _log_phase(phase="ui.build_answer", event="start", request_id=request_id)
             answer = build_ui_answer(core_answer, metric_payload, DOMAIN_META)
+            _log_phase(phase="ui.build_answer", event="end", request_id=request_id)
+
+            _log_phase(phase="request", event="end", request_id=request_id)
 
         except Exception as e:
             error = str(e)
+            _log_phase(phase="request", event="error", request_id=request_id, extra={"error": error})
             logger.exception("Request failed | request_id=%s", request_id)
 
     return render_template_string(
