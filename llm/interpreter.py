@@ -2,6 +2,7 @@ import json
 import logging
 from re import search
 from utils.json_utils import safe_json_extract
+from utils.logging_setup import payload_logging_enabled
 
 logger = logging.getLogger("logger")
 
@@ -56,10 +57,13 @@ EXECUTED_RESULTS:
     
         return json.dumps(strip(obj), indent=2)
     
-    logger.info(
-        "INTERPRETER RAW OUTPUT >>>\n%s\n<<< END RAW OUTPUT",
-        strip_rows_from_raw(raw)
-    )
+    if payload_logging_enabled():
+        logger.info(
+            "INTERPRETER RAW OUTPUT >>>\n%s\n<<< END RAW OUTPUT",
+            strip_rows_from_raw(raw)
+        )
+    else:
+        logger.info("INTERPRETER output received | chars=%d", len(raw))
 
     try:
         return safe_json_extract(raw)
@@ -78,9 +82,12 @@ Respond with ONLY corrected JSON.
 """
         repaired = model.generate_content(repair_prompt).text.strip()
 
-        logger.info(
-            "INTERPRETER REPAIRED OUTPUT >>>\n%s\n<<< END REPAIRED OUTPUT",
-            repaired
-        )
+        if payload_logging_enabled():
+            logger.info(
+                "INTERPRETER REPAIRED OUTPUT >>>\n%s\n<<< END REPAIRED OUTPUT",
+                repaired
+            )
+        else:
+            logger.info("INTERPRETER repaired output received | chars=%d", len(repaired))
 
         return safe_json_extract(repaired)

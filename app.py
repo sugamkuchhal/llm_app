@@ -11,7 +11,12 @@ import base64
 import datetime
 import time
 from decimal import Decimal
-from utils.logging_setup import configure_logging, set_request_id, get_log_buffer
+from utils.logging_setup import (
+    configure_logging,
+    set_request_id,
+    get_log_buffer,
+    payload_logging_enabled,
+)
 
 warnings.filterwarnings(
     "ignore",
@@ -197,7 +202,10 @@ def extract_metric_manifest(text: str):
         raise RuntimeError("Invalid METRIC_MANIFEST marker ordering")
 
     block = text[begin_idx + len(begin):end_idx].strip()
-    logger.info("RAW METRIC_MANIFEST >>>\n%s\n<<< END METRIC_MANIFEST", block)
+    if payload_logging_enabled():
+        logger.info("RAW METRIC_MANIFEST >>>\n%s\n<<< END METRIC_MANIFEST", block)
+    else:
+        logger.info("METRIC_MANIFEST extracted | chars=%d", len(block))
 
     # Deterministic guard: the manifest must be a JSON array.
     if not block.startswith("[") or not block.endswith("]"):
