@@ -9,6 +9,7 @@ import uuid
 import warnings
 import base64
 import datetime
+import time
 from decimal import Decimal
 from utils.logging_setup import configure_logging, set_request_id, get_log_buffer
 
@@ -56,6 +57,18 @@ configure_logging()
 logger = logging.getLogger("logger")
 logger.setLevel(logging.INFO)
 logger.propagate = True
+
+
+def _utc_ts() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _log_phase(*, phase: str, event: str, request_id: str, extra: dict | None = None):
+    payload = {"ts": _utc_ts(), "phase": phase, "event": event, "request_id": request_id}
+    if extra:
+        payload.update(extra)
+    # Keep the log line JSON-friendly for downstream parsing.
+    logger.info("PHASE_EVENT %s", json.dumps(payload, sort_keys=True))
 
 
 # --------------------------------------------------
@@ -1308,6 +1321,12 @@ def run_all_bigquery(queries):
         sql = q.get("sql", "")
         output_schema = q.get("output_schema")
         try:
+            t0 = time.perf_counter()
+            logger.info(
+                "BQ_QUERY event=start ts=%s metric_index=%s",
+                _utc_ts(),
+                metric_index,
+            )
             if not isinstance(output_schema, list) or not output_schema:
                 raise RuntimeError(f"Missing OUTPUT_SCHEMA for query #{metric_index}")
 
@@ -1386,7 +1405,24 @@ def run_all_bigquery(queries):
                 "field_info": field_info,
                 "output_schema": output_schema,
             })
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            logger.info(
+                "BQ_QUERY event=end ts=%s metric_index=%s duration_ms=%s bytes_processed=%s rows=%s",
+                _utc_ts(),
+                metric_index,
+                dur_ms,
+                getattr(dry_job, "total_bytes_processed", None),
+                len(rows),
+            )
         except Exception as e:
+            dur_ms = int((time.perf_counter() - t0) * 1000) if "t0" in locals() else None
+            logger.error(
+                "BQ_QUERY event=error ts=%s metric_index=%s duration_ms=%s error=%s",
+                _utc_ts(),
+                metric_index,
+                dur_ms,
+                str(e),
+            )
             logger.exception("BigQuery execution failed | metric_index=%s", metric_index)
             raise RuntimeError(
                 f"BigQuery execution failed for query #{metric_index}: {e}"
@@ -1615,12 +1651,16 @@ def index():
     if request.method == "POST":
         try:
             question = request.form["question"]  # ✅ FIX
+            _log_phase(phase="request", event="start", request_id=request_id, extra={"method": request.method})
 
             # Lazily initialize clients/models so the container can start even if
             # credentials aren't available during import time.
+            _log_phase(phase="init", event="start", request_id=request_id)
             bq_client = get_bq_client()
             planner_model, interpreter_model = get_models()
+            _log_phase(phase="init", event="end", request_id=request_id)
 
+            _log_phase(phase="dimensions.default_rows", event="start", request_id=request_id)
             default_rows = fetch_default_dimension_rows(
                 bq_client=bq_client,
                 limit=(
@@ -1630,18 +1670,49 @@ def index():
                     else int(os.getenv("DEFAULT_DIMENSIONS_LIMIT", "100"))
                 ),
             )
+            _log_phase(
+                phase="dimensions.default_rows",
+                event="end",
+                request_id=request_id,
+                extra={"count": len(default_rows or [])},
+            )
+
+            _log_phase(phase="dimensions.candidates", event="start", request_id=request_id)
             candidates = fetch_candidate_dimension_rows_for_question(
                 bq_client=bq_client,
                 question=question,
                 limit=int(os.getenv("DIMENSION_CANDIDATES_LIMIT", "200")),
             )
+            _log_phase(
+                phase="dimensions.candidates",
+                event="end",
+                request_id=request_id,
+                extra={"count": len(candidates or [])},
+            )
+
+            _log_phase(phase="dimensions.merge", event="start", request_id=request_id)
             allowed_rows = merge_dimension_rows(candidates, default_rows)
+            _log_phase(
+                phase="dimensions.merge",
+                event="end",
+                request_id=request_id,
+                extra={"count": len(allowed_rows or [])},
+            )
+
+            _log_phase(phase="dimensions.select_default", event="start", request_id=request_id)
             selected_default = pick_selected_default_row(
                 question=question,
                 # Defaults must come strictly from is_default=TRUE curated rows.
                 default_rows=default_rows,
             )
+            _log_phase(
+                phase="dimensions.select_default",
+                event="end",
+                request_id=request_id,
+                extra={"selected_default_dimensions": selected_default},
+            )
 
+            _log_phase(phase="pipeline.run_analysis", event="start", request_id=request_id)
             result = run_analysis(
                 question=question,
                 session=session,
@@ -1679,6 +1750,7 @@ def index():
                 get_chat_history=get_chat_history,
                 append_chat_turn=append_chat_turn
             )
+            _log_phase(phase="pipeline.run_analysis", event="end", request_id=request_id)
             
             planner_text = result["planner_text"]
             filters = result["filters"]
@@ -1689,6 +1761,7 @@ def index():
             resolved_target = (resolved_filters.get("target") or {}).get("value")
             resolved_channel = (resolved_filters.get("channel") or {}).get("value")
             
+            _log_phase(phase="shadow_dimensions", event="start", request_id=request_id)
             shadow_dims = shadow_resolve_dimensions_bq(
                 bq_client=bq_client,
                 genre=resolved_genre,
@@ -1696,6 +1769,7 @@ def index():
                 target=resolved_target,
                 channel=resolved_channel
             )
+            _log_phase(phase="shadow_dimensions", event="end", request_id=request_id, extra={"shadow_dims": shadow_dims})
             
             logger.info(
                 "SHADOW_DIMENSION_COMPARE | planner=%s | db=%s | match=%s",
@@ -1716,11 +1790,15 @@ def index():
             core_answer = result["validated_answer"]
             metric_payload = result["metric_payload"]
 
-#            answer = build_ui_answer(core_answer, metric_payload)
+            _log_phase(phase="ui.build_answer", event="start", request_id=request_id)
             answer = build_ui_answer(core_answer, metric_payload, DOMAIN_META)
+            _log_phase(phase="ui.build_answer", event="end", request_id=request_id)
+
+            _log_phase(phase="request", event="end", request_id=request_id)
 
         except Exception as e:
             error = str(e)
+            _log_phase(phase="request", event="error", request_id=request_id, extra={"error": error})
             logger.exception("Request failed | request_id=%s", request_id)
 
     return render_template_string(
