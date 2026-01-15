@@ -421,19 +421,20 @@ def make_validate_filters(
             f["region"]["value"] = NO_FILTER_SENTINEL
             region = NO_FILTER_SENTINEL
 
-        # Resolve time_window (default to Last 4 Weeks unless user specified time).
-        resolved_tw, tw_source = resolve_time_window_value(planner_value=time_window, question=qtext)
-        if resolved_tw == NO_FILTER_SENTINEL and user_specified_time:
-            raise RuntimeError("User specified a time window, but FILTERS time_window is not constrained")
+        # Resolve time_window.
+        # Policy:
+        # - If user did NOT specify time: force default "Last 4 Weeks" (even if planner filled something else),
+        #   and label it as default.
+        # - If user DID specify time: planner must constrain it (no __NO_FILTER__/ALL).
+        if not user_specified_time:
+            resolved_tw, tw_source = ("Last 4 Weeks", "default")
+        else:
+            resolved_tw, tw_source = resolve_time_window_value(planner_value=time_window, question=qtext)
+            if resolved_tw == NO_FILTER_SENTINEL:
+                raise RuntimeError("User specified a time window, but FILTERS time_window is not constrained")
+
         f["time_window"]["value"] = resolved_tw
         time_window = resolved_tw
-
-        # If no time is specified by the user, time_window must default to last 4 weeks.
-        if not user_specified_time:
-            if not re.search(r"\b4\b.*\bweek", (time_window or "").lower()):
-                raise RuntimeError(
-                    "Time Window must default to Last 4 Weeks when user does not specify a time window"
-                )
 
         # Resolve region/target defaults unless user specified them.
         region_source = "explicit"
@@ -448,7 +449,9 @@ def make_validate_filters(
         channel_norm = normalize_no_filter_to_none(channel)
         target_norm = normalize_no_filter_to_none(target)
 
-        if not user_specified_region and is_no_filter_value(region):
+        # If user did NOT specify region, we always apply SYSTEM defaults/inference,
+        # even if the planner filled a region value (to avoid HSM/EBN ambiguity drift).
+        if not user_specified_region:
             chosen, src = choose_default_with_constraints(
                 dim="region",
                 selected_default_dimensions=selected_default_dimensions,
@@ -467,7 +470,8 @@ def make_validate_filters(
 
         region_norm = normalize_no_filter_to_none(region)
 
-        if not user_specified_target and is_no_filter_value(target):
+        # Same policy for target: if user did NOT specify it, force defaults/inference.
+        if not user_specified_target:
             chosen, src = choose_default_with_constraints(
                 dim="target",
                 selected_default_dimensions=selected_default_dimensions,
