@@ -1,7 +1,22 @@
 steps:
 - name: gcr.io/cloud-builders/docker
+  entrypoint: bash
   args:
-    ["build", "-t", "asia-south1-docker.pkg.dev/$PROJECT_ID/docker-repo/llm-app", "."]
+    - -c
+    - |
+      # Best-effort pull for layer caching (first build may not exist yet).
+      docker pull "asia-south1-docker.pkg.dev/$PROJECT_ID/docker-repo/llm-app" || true
+
+- name: gcr.io/cloud-builders/docker
+  args:
+    [
+      "build",
+      "--cache-from",
+      "asia-south1-docker.pkg.dev/$PROJECT_ID/docker-repo/llm-app",
+      "-t",
+      "asia-south1-docker.pkg.dev/$PROJECT_ID/docker-repo/llm-app",
+      "."
+    ]
 
 - name: gcr.io/cloud-builders/docker
   args:
