@@ -26,16 +26,28 @@ class TestBarcFilterResolution(unittest.TestCase):
         self.assertFalse(region)
         self.assertFalse(target)
 
-    def test_infer_user_specified_region_honors_locative_phrase(self):
+    def test_infer_user_specified_region_honors_locative_phrase_for_non_genre_token(self):
         candidates = [
-            {"region": "HSM", "target": "NCCS All 15+"},
+            {"region": "India", "target": "NCCS All 15+"},
         ]
         region, target = infer_user_specified_region_target(
-            question="top channels in HSM",
+            question="top channels in India",
             candidates=candidates,
             inferred_genre="HSM",
         )
         self.assertTrue(region)
+        self.assertFalse(target)
+
+    def test_infer_user_specified_region_does_not_promote_genre_code_in_locative_phrase(self):
+        candidates = [
+            {"region": "HSM", "target": "NCCS All 15+"},
+        ]
+        region, target = infer_user_specified_region_target(
+            question="top performing timebands for NDTV in HSM",
+            candidates=candidates,
+            inferred_genre="HSM",
+        )
+        self.assertFalse(region)
         self.assertFalse(target)
 
     def test_infer_user_specified_region_disambiguates_factual_code(self):
