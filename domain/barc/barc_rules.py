@@ -203,6 +203,37 @@ def choose_default_with_constraints(
     if len(uniq) == 1:
         return (sorted(uniq)[0], "inferred")
 
+    # Practical fallback (deep in the tree):
+    # If target is still ambiguous for a (genre, region, ...) slice and there is
+    # no region-specific is_default=TRUE row, fall back to a genre-level default
+    # target derived from is_default=TRUE rows (ignoring region).
+    #
+    # This chooses a deterministic target instead of returning "no filter".
+    # NOTE: This is NOT labeled as "default" because it is not a true default
+    # for the (genre, region) slice; we label it as "inferred".
+    if dim == "target" and len(uniq) > 1:
+        genre = (constraints or {}).get("genre")
+        genre_norm = normalize_no_filter_to_none(genre)
+        if genre_norm:
+            genre_default_targets = sorted(
+                {
+                    normalize_no_filter_to_none(r.get("target"))
+                    for r in (allowed_rows or [])
+                    if isinstance(r, dict)
+                    and bool(r.get("is_default")) is True
+                    and normalize_no_filter_to_none(r.get("genre"))
+                    and normalize_no_filter_to_none(r.get("genre")).strip().lower() == genre_norm.strip().lower()
+                    and normalize_no_filter_to_none(r.get("target"))
+                }
+            )
+            if genre_default_targets:
+                # Prefer the SYSTEM default if it matches one of the genre defaults.
+                if desired and any(t.strip().lower() == desired.strip().lower() for t in genre_default_targets):
+                    for t in genre_default_targets:
+                        if t.strip().lower() == desired.strip().lower():
+                            return (t, "inferred")
+                return (genre_default_targets[0], "inferred")
+
     # Otherwise, no constraint.
     return (None, "none")
 
