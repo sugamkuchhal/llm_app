@@ -131,6 +131,7 @@ def run_analysis(
     metric_payload = build_metric_payload(metric_manifest, raw_bq_results)
 
     filters = parsed_filters.get("filters_list", [])
+    resolved_filters = parsed_filters.get("resolved_filters", {})
 
     logger.info(
         "Metric payload built for interpreter | metric_count=%d",
@@ -178,6 +179,7 @@ def run_analysis(
         "question": question,
         "planner_text": planner_text,
         "filters": filters,
+        "resolved_filters": resolved_filters,
         "metric_manifest": metric_manifest,
         "sql_blocks": sql_blocks,
         "raw_bq_results": raw_bq_results,

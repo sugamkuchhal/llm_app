@@ -27,6 +27,15 @@ from pipeline.analysis_runner import run_analysis
 from ui.answer_builder import build_ui_answer
 from domain.barc.barc_validation import shadow_resolve_dimensions_bq
 from domain.barc.barc_mappings import resolve_genre
+from domain.barc.barc_rules import (
+    NO_FILTER_SENTINEL,
+    is_no_filter_value,
+    normalize_no_filter_to_none,
+    infer_user_specified_region_target,
+    resolve_time_window_value,
+    infer_include_dead_hours,
+    choose_default_with_constraints,
+)
 from domain.barc.barc_dimension_reference import (
     fetch_default_dimension_rows,
     fetch_candidate_dimension_rows_for_question,
@@ -270,17 +279,11 @@ def extract_filters(planner_text: str) -> dict:
     if missing:
         raise RuntimeError(f"FILTERS block missing required keys: {missing}")
 
-    NO_FILTER_SENTINEL = "__NO_FILTER__"
-
-    def _is_no_filter(v: str) -> bool:
-        vv = (v or "").strip()
-        return vv == NO_FILTER_SENTINEL or vv.upper() == "ALL"
-
     def _display(v: str) -> str:
-        return "(no filter)" if _is_no_filter(v) else v
+        return "(no filter)" if is_no_filter_value(v) else (v or "")
 
     filters_list = [f"{k}: {_display(parsed[k]['value'])}" for k in required]
-    return {"filters": parsed, "filters_list": filters_list}
+    return {"filters": parsed, "filters_list": filters_list, "resolved_filters": {}}
 
 
 def make_validate_filters(
@@ -297,28 +300,7 @@ def make_validate_filters(
     - if all 4 dims are specified (non-ALL), the tuple must exist in allowed_rows
     - SQL must not contain region/target equality filters when FILTERS says ALL
     """
-    q = (question or "").lower()
-    NO_FILTER_SENTINEL = "__NO_FILTER__"
-
-    def _is_no_filter(v: str) -> bool:
-        vv = (v or "").strip()
-        return vv == NO_FILTER_SENTINEL or vv.upper() == "ALL"
-
-    def _display(v: str) -> str:
-        return "(no filter)" if _is_no_filter(v) else v
-
-    def _contains_any(values: set[str]) -> bool:
-        for v in values:
-            if v and v.lower() in q:
-                return True
-        return False
-
-    # Best-effort "user specified" detection using bounded candidate rows.
-    cand_regions = {str(r.get("region", "")).strip() for r in (candidates or []) if r.get("region")}
-    cand_targets = {str(r.get("target", "")).strip() for r in (candidates or []) if r.get("target")}
-
-    user_specified_region = _contains_any(cand_regions)
-    user_specified_target = _contains_any(cand_targets)
+    q = (question or "")
 
     # Allowed values by column (derived from allowed rows)
     allowed_by_col: dict[str, set[str]] = {"genre": set(), "region": set(), "target": set(), "channel": set()}
@@ -382,21 +364,21 @@ def make_validate_filters(
 
     def validate_filters_impl(*, parsed_filters: dict, sql_blocks: list[dict], question: str, planner_text: str):
         f = parsed_filters["filters"]
-        # IMPORTANT POLICY (simplified):
-        # - If the user did NOT specify region/target in the question, we APPLY selected defaults
-        #   from SELECTED_DEFAULT_DIMENSIONS (instead of using the no-filter sentinel).
-        # - If FILTERS indicates no-filter for region/target, SQL must not contain those predicates.
-        # - If FILTERS indicates a specific region/target, SQL must include the corresponding predicate.
-        genre = (f["genre"]["value"] or "").strip()
-        region = (f["region"]["value"] or "").strip()
-        target = (f["target"]["value"] or "").strip()
-        time_window = (f["time_window"]["value"] or "").strip()
+        # Canonical resolution policy (single source of truth):
+        # - FILTERS values are treated as planner intent, but we resolve region/target/time_window
+        #   against SYSTEM defaults and allowed_rows to eliminate mismatches and ambiguity.
+        # - SQL validation is always against the resolved filters.
+        genre = (f.get("genre", {}).get("value") or "").strip()
+        region = (f.get("region", {}).get("value") or "").strip()
+        target = (f.get("target", {}).get("value") or "").strip()
+        channel = (f.get("channel", {}).get("value") or "").strip()
+        time_window = (f.get("time_window", {}).get("value") or "").strip()
 
-        qtext = (question or "").lower()
+        qtext = (question or "")
+        qtext_l = qtext.lower()
 
         def _user_specified_time_window(text: str) -> bool:
             t = (text or "").lower()
-            # If user mentions a time window/date range, treat as specified.
             return bool(
                 re.search(r"\b(last|latest|past)\s+\d+\s+(day|days|week|weeks)\b", t)
                 or re.search(r"\b(\d{4}-\d{2}-\d{2})\b", t)
@@ -405,12 +387,7 @@ def make_validate_filters(
                 or re.search(r"\bweek_id\b|\bweek\s+\d+\b", t)
             )
 
-        user_specified_time = _user_specified_time_window(qtext)
-
-        # If no time is specified by the user, time_window must default to last 4 weeks.
-        if not user_specified_time:
-            if not re.search(r"\b4\b.*\bweek", time_window.lower()):
-                raise RuntimeError("Time Window must default to Last 4 Weeks when user does not specify a time window")
+        user_specified_time = _user_specified_time_window(qtext_l)
 
         def _sql_touches(sql: str, table: str) -> bool:
             s = (sql or "").lower()
@@ -418,54 +395,90 @@ def make_validate_filters(
             return f"barc_slm_poc.{table}".lower() in s
 
         # Dead-hours: exclude by default for time_band/program unless user explicitly includes.
-        include_dead_hours = bool(
-            re.search(r"\b(include|including|with)\s+dead\s+hours\b", qtext)
-            or re.search(r"\ball\s+hours\b|\b24x7\b|\b24\s*/\s*7\b", qtext)
+        include_dead_hours = infer_include_dead_hours(qtext)
+
+        # Heuristic correction: prevent genre codes being placed in region (common LLM slip).
+        inferred_genre = resolve_genre(question)
+        user_specified_region, user_specified_target = infer_user_specified_region_target(
+            question=qtext,
+            candidates=candidates,
+            inferred_genre=inferred_genre,
         )
 
-        # Heuristic correction: prevent genre codes (e.g. HSM/EBN/HBN) from being placed in region.
-        # Example: "top performing timebands for NDTV in HSM" -> HSM is a genre, not a region.
-        inferred_genre = resolve_genre(question)
         if (
             inferred_genre
             and not user_specified_region
-            and not _is_no_filter(region)
+            and not is_no_filter_value(region)
             and (region or "").strip().lower() == inferred_genre.strip().lower()
-            and _is_no_filter(genre)
+            and is_no_filter_value(genre)
         ):
             f["genre"]["value"] = inferred_genre
             genre = inferred_genre
             f["region"]["value"] = NO_FILTER_SENTINEL
             region = NO_FILTER_SENTINEL
 
-        # Apply region/target defaults unless user specified them.
-        default_notes: list[str] = []
-        if user_specified_region and _is_no_filter(region):
+        # Resolve time_window (default to Last 4 Weeks unless user specified time).
+        resolved_tw, tw_source = resolve_time_window_value(planner_value=time_window, question=qtext)
+        if resolved_tw == NO_FILTER_SENTINEL and user_specified_time:
+            raise RuntimeError("User specified a time window, but FILTERS time_window is not constrained")
+        f["time_window"]["value"] = resolved_tw
+        time_window = resolved_tw
+
+        # If no time is specified by the user, time_window must default to last 4 weeks.
+        if not user_specified_time:
+            if not re.search(r"\b4\b.*\bweek", (time_window or "").lower()):
+                raise RuntimeError(
+                    "Time Window must default to Last 4 Weeks when user does not specify a time window"
+                )
+
+        # Resolve region/target defaults unless user specified them.
+        region_source = "explicit"
+        target_source = "explicit"
+
+        if user_specified_region and is_no_filter_value(region):
             raise RuntimeError("User specified a region, but FILTERS region is not constrained")
-        if user_specified_target and _is_no_filter(target):
+        if user_specified_target and is_no_filter_value(target):
             raise RuntimeError("User specified a target, but FILTERS target is not constrained")
 
-        if not user_specified_region and _is_no_filter(region):
-            chosen = (selected_default_dimensions or {}).get("region")
-            if chosen and not _is_no_filter(str(chosen)):
-                f["region"]["value"] = str(chosen)
-                region = str(chosen)
-                default_notes.append(f"Default Region (applied): {chosen}")
-            else:
-                f["region"]["value"] = NO_FILTER_SENTINEL
-                region = NO_FILTER_SENTINEL
-                default_notes.append("Default Region: (no filter)")
+        genre_norm = normalize_no_filter_to_none(genre)
+        channel_norm = normalize_no_filter_to_none(channel)
+        target_norm = normalize_no_filter_to_none(target)
 
-        if not user_specified_target and _is_no_filter(target):
-            chosen = (selected_default_dimensions or {}).get("target")
-            if chosen and not _is_no_filter(str(chosen)):
-                f["target"]["value"] = str(chosen)
-                target = str(chosen)
-                default_notes.append(f"Default Target (applied): {chosen}")
-            else:
-                f["target"]["value"] = NO_FILTER_SENTINEL
-                target = NO_FILTER_SENTINEL
-                default_notes.append("Default Target: (no filter)")
+        if not user_specified_region and is_no_filter_value(region):
+            chosen, src = choose_default_with_constraints(
+                dim="region",
+                selected_default_dimensions=selected_default_dimensions,
+                allowed_rows=allowed_rows,
+                constraints={
+                    "genre": genre_norm,
+                    "channel": channel_norm,
+                    "target": target_norm,
+                },
+            )
+            region_source = src
+            f["region"]["value"] = chosen or NO_FILTER_SENTINEL
+            region = f["region"]["value"]
+        else:
+            region_source = "explicit"
+
+        region_norm = normalize_no_filter_to_none(region)
+
+        if not user_specified_target and is_no_filter_value(target):
+            chosen, src = choose_default_with_constraints(
+                dim="target",
+                selected_default_dimensions=selected_default_dimensions,
+                allowed_rows=allowed_rows,
+                constraints={
+                    "genre": genre_norm,
+                    "channel": channel_norm,
+                    "region": region_norm,
+                },
+            )
+            target_source = src
+            f["target"]["value"] = chosen or NO_FILTER_SENTINEL
+            target = f["target"]["value"]
+        else:
+            target_source = "explicit"
 
         # Decide whether dead-hours is relevant for display (only if the query touches those tables).
         touches_dead_hours_tables = False
@@ -497,14 +510,46 @@ def make_validate_filters(
                 or re.search(rf"\b{re.escape(col)}\b\s+in\s*\(\s*'{v_re}'\b", s, flags=re.IGNORECASE)
             )
 
-        # Rebuild the user-visible list after any normalization.
+        def _sql_has_any_dim_predicate(sql: str, col: str) -> bool:
+            s = sql or ""
+            c = re.escape(col)
+            return bool(
+                re.search(rf"\b{c}\b\s*=\s*'[^']+'\b", s, flags=re.IGNORECASE)
+                or re.search(rf"\b{c}\b\s+in\s*\(", s, flags=re.IGNORECASE)
+                or re.search(rf"\b(lower|upper|trim)\s*\(\s*[\w\.\s]*\b{c}\b[\w\.\s]*\)\s*(=|in)\b", s, flags=re.IGNORECASE)
+            )
+
+        def _display_value(v: str, source: str | None = None) -> str:
+            if is_no_filter_value(v):
+                return "(no filter)"
+            suffix = ""
+            if source == "default":
+                suffix = " (default)"
+            elif source == "inferred":
+                suffix = " (inferred)"
+            return f"{v}{suffix}"
+
+        # Rebuild the user-visible list after resolution (no duplicate "default notes").
         parsed_filters["filters_list"] = [
-            f"{k}: {_display(f[k]['value'])}" for k in ["genre", "region", "target", "channel", "time_window"]
-        ] + default_notes
+            f"genre: {_display_value(f['genre']['value'])}",
+            f"region: {_display_value(f['region']['value'], region_source)}",
+            f"target: {_display_value(f['target']['value'], target_source)}",
+            f"channel: {_display_value(f['channel']['value'])}",
+            f"time_window: {_display_value(f['time_window']['value'], tw_source)}",
+        ]
         if touches_dead_hours_tables:
             parsed_filters["filters_list"].append(
                 "dead_hours: included" if include_dead_hours else "dead_hours: excluded (default)"
             )
+
+        parsed_filters["resolved_filters"] = {
+            "genre": {"value": normalize_no_filter_to_none(f["genre"]["value"]), "source": "explicit"},
+            "region": {"value": normalize_no_filter_to_none(f["region"]["value"]), "source": region_source},
+            "target": {"value": normalize_no_filter_to_none(f["target"]["value"]), "source": target_source},
+            "channel": {"value": normalize_no_filter_to_none(f["channel"]["value"]), "source": "explicit"},
+            "time_window": {"value": normalize_no_filter_to_none(f["time_window"]["value"]), "source": tw_source},
+            "dead_hours": {"value": "included" if include_dead_hours else "excluded", "source": "default" if not include_dead_hours else "explicit"},
+        }
 
         def _require_dead_hours_exclusion(sql: str):
             s = (sql or "").lower()
@@ -585,7 +630,7 @@ def make_validate_filters(
                 )
 
         # Parse time_window value best-effort for enforcement.
-        tw = time_window.lower()
+        tw = (time_window or "").lower()
         m_weeks = re.search(r"\b(\d+)\s*week", tw)
         n_weeks = int(m_weeks.group(1)) if m_weeks else None
 
@@ -622,24 +667,27 @@ def make_validate_filters(
             if (touches_time_band or touches_program) and not include_dead_hours:
                 _require_dead_hours_exclusion(sql)
 
-            if _is_no_filter(region):
-                if re.search(r"\bregion\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
+            resolved_region = normalize_no_filter_to_none(region)
+            resolved_target = normalize_no_filter_to_none(target)
+
+            if resolved_region is None:
+                if _sql_has_any_dim_predicate(sql, "region"):
                     raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
             else:
-                if not _sql_has_dim_filter(sql, "region", region):
-                    raise RuntimeError(f"SQL is missing a region filter for FILTERS region={region}")
+                if not _sql_has_dim_filter(sql, "region", resolved_region):
+                    raise RuntimeError(f"SQL is missing a region filter for FILTERS region={resolved_region}")
 
-            if _is_no_filter(target):
-                if re.search(r"\btarget\b\s*=\s*'[^']+'\b", sql, flags=re.IGNORECASE):
+            if resolved_target is None:
+                if _sql_has_any_dim_predicate(sql, "target"):
                     raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
             else:
-                if not _sql_has_dim_filter(sql, "target", target):
-                    raise RuntimeError(f"SQL is missing a target filter for FILTERS target={target}")
+                if not _sql_has_dim_filter(sql, "target", resolved_target):
+                    raise RuntimeError(f"SQL is missing a target filter for FILTERS target={resolved_target}")
 
         # Validate non-ALL values are in allowed rows (column-wise)
         for col in ("genre", "region", "target", "channel"):
             val = (f[col]["value"] or "").strip()
-            if _is_no_filter(val):
+            if is_no_filter_value(val):
                 continue
             if val.lower() not in allowed_by_col.get(col, set()):
                 raise RuntimeError(
@@ -651,7 +699,7 @@ def make_validate_filters(
         r = (f["region"]["value"] or "").strip()
         t = (f["target"]["value"] or "").strip()
         c = (f["channel"]["value"] or "").strip()
-        if all(x and not _is_no_filter(x) for x in (g, r, t, c)):
+        if all(x and not is_no_filter_value(x) for x in (g, r, t, c)):
             if not _tuple_exists(g, r, t, c):
                 suggestion = _suggest_tuple(g, r, t, c)
                 raise RuntimeError(
@@ -1552,27 +1600,12 @@ def index():
             
             planner_text = result["planner_text"]
             filters = result["filters"]
+            resolved_filters = result.get("resolved_filters") or {}
 
-            def _extract_dim(filters, name):
-                for f in filters:
-                    if f.lower().startswith(name.lower()):
-                        return f.split(":", 1)[-1].strip()
-                return None
-            
-            def _normalize_no_filter(v: str | None) -> str | None:
-                if not v:
-                    return None
-                vv = v.strip()
-                if vv in {"__NO_FILTER__", "(no filter)"}:
-                    return None
-                if vv.upper() == "ALL":
-                    return None
-                return vv
-
-            resolved_genre = _normalize_no_filter(_extract_dim(filters, "genre"))
-            resolved_region = _normalize_no_filter(_extract_dim(filters, "region"))
-            resolved_target = _normalize_no_filter(_extract_dim(filters, "target"))
-            resolved_channel = _normalize_no_filter(_extract_dim(filters, "channel"))
+            resolved_genre = (resolved_filters.get("genre") or {}).get("value")
+            resolved_region = (resolved_filters.get("region") or {}).get("value")
+            resolved_target = (resolved_filters.get("target") or {}).get("value")
+            resolved_channel = (resolved_filters.get("channel") or {}).get("value")
             
             shadow_dims = shadow_resolve_dimensions_bq(
                 bq_client=bq_client,

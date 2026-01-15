@@ -7,6 +7,16 @@ GENRE_ALIASES = {
     "hindi business": "HBN v1",
     "hbn": "HBN v1",
 
+    # English General News
+    "english general news": "EGN",
+    "english general": "EGN",
+    "egn": "EGN",
+
+    # Factual
+    # Keep as a compact code to match how it may appear in filters/candidate rows.
+    "factual": "FACTUAL",
+    "factual entertainment": "FACTUAL",
+
     "english news": "English News",
     "hindi news": "HSM",
     "hsm": "HSM",
