@@ -122,3 +122,15 @@ def configure_logging() -> None:
     # Reduce noisy frameworks by default; can still be overridden via LOG_LEVEL.
     logging.getLogger("werkzeug").setLevel(max(level, logging.WARNING))
 
+
+def payload_logging_enabled() -> bool:
+    """
+    Controls whether large payloads (SQL, manifests, LLM JSON) are logged.
+
+    Default: disabled (safer + faster + less noisy).
+
+    Enable via env var:
+    - LOG_DEBUG_PAYLOADS=1 (or true/yes)
+    """
+    return os.getenv("LOG_DEBUG_PAYLOADS", "0").strip().lower() in {"1", "true", "yes"}
+

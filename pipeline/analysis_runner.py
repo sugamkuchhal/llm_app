@@ -8,6 +8,7 @@ import uuid
 import re
 from validators.answer_validator import validate_answer
 from validators.manifest_validator import validate_manifest
+from utils.logging_setup import payload_logging_enabled
 
 logger = logging.getLogger("logger")
 
@@ -90,12 +91,15 @@ def run_analysis(
     # ---------------------------
     sql_blocks = extract_all_sql(planner_text)
 
-    # Log SQL blocks (truncated) so Cloud Run logs always show what was generated.
+    # Log SQL blocks (full snippet only when payload logging enabled).
     for qb in sql_blocks or []:
         idx = qb.get("metric_index")
         sql = (qb.get("sql", "") or "").strip()
-        snippet = (sql[:1200] + "...(truncated)") if len(sql) > 1200 else sql
-        logger.info("SQL block extracted | index=%s | sql_snippet=%s", idx, snippet)
+        if payload_logging_enabled():
+            snippet = (sql[:1200] + "...(truncated)") if len(sql) > 1200 else sql
+            logger.info("SQL block extracted | index=%s | sql_snippet=%s", idx, snippet)
+        else:
+            logger.info("SQL block extracted | index=%s | sql_chars=%d", idx, len(sql))
 
     validate_metric_sql_binding(metric_manifest, sql_blocks)
 
