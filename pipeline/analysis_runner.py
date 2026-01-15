@@ -130,7 +130,8 @@ def run_analysis(
 
     metric_payload = build_metric_payload(metric_manifest, raw_bq_results)
 
-    filters = parsed_filters.get("filters_list", [])
+    # Prefer rich filter display objects when available.
+    filters = parsed_filters.get("filters_display") or parsed_filters.get("filters_list", [])
     resolved_filters = parsed_filters.get("resolved_filters", {})
 
     logger.info(
