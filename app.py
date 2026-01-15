@@ -35,6 +35,8 @@ from domain.barc.barc_rules import (
     resolve_time_window_value,
     infer_include_dead_hours,
     choose_default_with_constraints,
+    sql_has_any_dim_predicate,
+    sql_has_dim_filter,
 )
 from domain.barc.barc_dimension_reference import (
     fetch_default_dimension_rows,
@@ -488,36 +490,7 @@ def make_validate_filters(
                 touches_dead_hours_tables = True
                 break
 
-        def _sql_has_dim_filter(sql: str, col: str, value: str) -> bool:
-            s = sql or ""
-            v = (value or "").strip()
-            if not v:
-                return False
-            v_re = re.escape(v)
-            # Accept a few common patterns (case-insensitive):
-            # - col = 'X'
-            # - LOWER(col) = LOWER('X')
-            # - UPPER(col) = UPPER('X')
-            # - TRIM(col) = 'X' (and combinations)
-            # - col IN ('X', ...)
-            return bool(
-                re.search(rf"\b{re.escape(col)}\b\s*=\s*'{v_re}'\b", s, flags=re.IGNORECASE)
-                or re.search(rf"\blower\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
-                or re.search(rf"\bupper\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*upper\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
-                or re.search(rf"\btrim\s*\(\s*\b{re.escape(col)}\b\s*\)\s*=\s*'{v_re}'\b", s, flags=re.IGNORECASE)
-                or re.search(rf"\bupper\s*\(\s*trim\s*\(\s*\b{re.escape(col)}\b\s*\)\s*\)\s*=\s*upper\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
-                or re.search(rf"\blower\s*\(\s*trim\s*\(\s*\b{re.escape(col)}\b\s*\)\s*\)\s*=\s*lower\s*\(\s*'{v_re}'\s*\)", s, flags=re.IGNORECASE)
-                or re.search(rf"\b{re.escape(col)}\b\s+in\s*\(\s*'{v_re}'\b", s, flags=re.IGNORECASE)
-            )
-
-        def _sql_has_any_dim_predicate(sql: str, col: str) -> bool:
-            s = sql or ""
-            c = re.escape(col)
-            return bool(
-                re.search(rf"\b{c}\b\s*=\s*'[^']+'\b", s, flags=re.IGNORECASE)
-                or re.search(rf"\b{c}\b\s+in\s*\(", s, flags=re.IGNORECASE)
-                or re.search(rf"\b(lower|upper|trim)\s*\(\s*[\w\.\s]*\b{c}\b[\w\.\s]*\)\s*(=|in)\b", s, flags=re.IGNORECASE)
-            )
+        # SQL predicate detection is centralized in domain.barc.barc_rules
 
         def _display_value(v: str, source: str | None = None) -> str:
             if is_no_filter_value(v):
@@ -671,17 +644,17 @@ def make_validate_filters(
             resolved_target = normalize_no_filter_to_none(target)
 
             if resolved_region is None:
-                if _sql_has_any_dim_predicate(sql, "region"):
+                if sql_has_any_dim_predicate(sql, col="region"):
                     raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
             else:
-                if not _sql_has_dim_filter(sql, "region", resolved_region):
+                if not sql_has_dim_filter(sql, col="region", value=resolved_region):
                     raise RuntimeError(f"SQL is missing a region filter for FILTERS region={resolved_region}")
 
             if resolved_target is None:
-                if _sql_has_any_dim_predicate(sql, "target"):
+                if sql_has_any_dim_predicate(sql, col="target"):
                     raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
             else:
-                if not _sql_has_dim_filter(sql, "target", resolved_target):
+                if not sql_has_dim_filter(sql, col="target", value=resolved_target):
                     raise RuntimeError(f"SQL is missing a target filter for FILTERS target={resolved_target}")
 
         # Validate non-ALL values are in allowed rows (column-wise)
