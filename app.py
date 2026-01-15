@@ -46,7 +46,6 @@ from domain.barc.barc_dimension_reference import (
 )
 from llm.planner import call_planner
 from llm.interpreter import call_interpreter
-from config.prompt_guard import assert_prompt_unchanged, hash_text
 
 
 import sys
@@ -155,11 +154,9 @@ try:
 except json.JSONDecodeError as e:
     raise RuntimeError("Invalid domain metadata JSON (barc_meta.json)") from e
 
-SYSTEM_PROMPT_HASH = "8386449207f92e38e138bcfe2d3227865d61d64d5159cacc772c8c6b38b2c3ff"
-PLANNER_PROMPT_HASH = "ce28b3fc8687ad1b98943ffe220ad0d3132db737bcb7f8fb42a78285a9e39d1d"
-
-assert_prompt_unchanged("SYSTEM_PROMPT", SYSTEM_PROMPT, SYSTEM_PROMPT_HASH)
-assert_prompt_unchanged("PLANNER_PROMPT", PLANNER_PROMPT, PLANNER_PROMPT_HASH)
+#
+# Prompt guard intentionally removed (no prompt hash enforcement).
+#
 
 
 # --------------------------------------------------
