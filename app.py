@@ -1569,7 +1569,7 @@ let countdownInterval;
 function handleSubmit(e) {
   e.preventDefault(); // ⬅️ REQUIRED
 
-  let seconds = 99;
+  let seconds = 199;
 
   document.getElementById("results").innerHTML = `
     <p><em>Running analysis…</em></p>
