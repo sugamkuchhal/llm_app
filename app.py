@@ -839,7 +839,8 @@ FORBIDDEN_SQL = re.compile(
     # Privilege / procedure
     r"grant|revoke|call|"
     # BigQuery scripting / dynamic SQL (not allowed in read-only flow)
-    r"begin|end|declare|set|commit|rollback|execute\s+immediate|execute"
+    # NOTE: do NOT forbid 'end' because it's valid in CASE ... END.
+    r"declare|set|commit|rollback|execute\s+immediate|execute"
     r")\b",
     re.IGNORECASE
 )
