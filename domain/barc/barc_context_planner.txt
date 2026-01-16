@@ -172,11 +172,6 @@ use the same methodology to find 'Cume Reach %age', by using channel_Week_Reach_
 Unless explicitly stated in the question, we should by default remove the dead hours from all calculations. The way to identify dead hours in time_band_table and program_table is 
 left(time_band_half_hour,2) in ('00','01','02','03','04','05')
 
-IMPORTANT IMPLEMENTATION NOTE:
-- Even if you filter to a specific non-dead-hour band (e.g., 9PM), you MUST still include the explicit dead-hours exclusion predicate:
-  LEFT(time_band_half_hour, 2) NOT IN ('00','01','02','03','04','05')
-- Only omit this predicate when the user explicitly asks to include dead hours / all hours / 24x7.
-
 ----------------------------
 
 SQL PLANNING NOTE:
