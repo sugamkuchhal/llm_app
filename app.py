@@ -586,6 +586,19 @@ def make_validate_filters(
 
         def _require_dead_hours_exclusion(sql: str):
             s = (sql or "").lower()
+            # If the query already restricts time_band_half_hour to a non-dead-hour
+            # band (e.g., 9PM -> hour '21'), dead-hours exclusion is redundant.
+            # Accept common patterns that guarantee hour NOT IN ('00'..'05').
+            hour_safe = bool(
+                # LEFT(time_band_half_hour, 2) = '21' (or any 06-23)
+                re.search(r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s*=\s*'?(0[6-9]|1\d|2[0-3])'?", s)
+                # LEFT(time_band_half_hour, 2) IN ('21','22',...)
+                or re.search(r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s+in\s*\(\s*'?(0[6-9]|1\d|2[0-3])'?", s)
+                # time_band_half_hour LIKE '21%' (or 06-23)
+                or re.search(r"\btime_band_half_hour\b\s+like\s+'(0[6-9]|1\d|2[0-3])%", s)
+            )
+            if hour_safe:
+                return
             # Accept common forms.
             ok = bool(
                 re.search(r"left\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*2\s*\)\s*not\s+in\s*\(", s)
