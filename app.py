@@ -1471,6 +1471,10 @@ details[open] .markdown-body p { margin: 8px 0; line-height: 1.0; }
 pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 .error { color:darkred; font-weight:600; }
 
+.takeaways { margin: 6px 0 6px 1.2em; }
+.takeaways li { margin-bottom: 10px; line-height: 1.45; }
+.takeaways li p { margin: 0; display: inline; }
+
 .filter-row { display: flex; gap: 8px; align-items: baseline; }
 .filter-label { min-width: 140px; font-weight: 600; }
 .filter-value { font-family: Inter, system-ui, sans-serif; }
@@ -1538,7 +1542,7 @@ pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 
 <details open>
   <summary>Key Takeaways</summary>
-  <ul>{% for t in answer.takeaways %}<li>{{ t }}</li>{% endfor %}</ul>
+  <ul class="takeaways">{% for t in answer.takeaways %}<li>{{ t | markdown | safe }}</li>{% endfor %}</ul>
 </details>
 
 <details>
