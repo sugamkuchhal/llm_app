@@ -39,6 +39,7 @@ def _question_mentions_time_window(question: str | None) -> bool:
     return bool(
         re.search(rf"\b(last|latest|past)\s+(?:\d+|{word_num})\s+(day|days|week|weeks)\b", q)
         or re.search(r"\b(last|latest|past)\s+week\b", q)
+        or re.search(r"\b(currently|current|right\s+now|as\s+of\s+now|this\s+week)\b", q)
         or re.search(r"\b(\d{4}-\d{2}-\d{2})\b", q)
         or re.search(r"\bbetween\b.*\band\b", q)
         or re.search(r"\bfrom\b.*\bto\b", q)
@@ -80,6 +81,10 @@ def infer_requested_weeks(question: str | None) -> int | None:
 
     # Handle "last week"/"latest week" as 1 week.
     if re.search(r"\b(last|latest|past)\s+week\b", q):
+        return 1
+
+    # Treat "currently"/"current"/"right now"/"as of now"/"this week" as latest week (1).
+    if re.search(r"\b(currently|current|right\s+now|as\s+of\s+now|this\s+week)\b", q):
         return 1
 
     return None
