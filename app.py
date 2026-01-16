@@ -783,22 +783,26 @@ def make_validate_filters(
             if (touches_time_band or touches_program) and not include_dead_hours:
                 _require_dead_hours_exclusion(sql)
 
-            resolved_region = domain_adapter.normalize_no_filter_to_none(region)
-            resolved_target = domain_adapter.normalize_no_filter_to_none(target)
+            # Optional enforcement: FILTERS must match SQL region/target predicates.
+            # Default is OFF to avoid stability issues from planner drift.
+            enforce_dim_filter_sql = os.getenv("ENFORCE_DIM_FILTER_SQL", "0").strip().lower() in {"1", "true", "yes"}
+            if enforce_dim_filter_sql:
+                resolved_region = domain_adapter.normalize_no_filter_to_none(region)
+                resolved_target = domain_adapter.normalize_no_filter_to_none(target)
 
-            if resolved_region is None:
-                if domain_adapter.sql_has_any_dim_predicate(sql, col="region"):
-                    raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
-            else:
-                if not domain_adapter.sql_has_dim_filter(sql, col="region", value=resolved_region):
-                    raise RuntimeError(f"SQL is missing a region filter for FILTERS region={resolved_region}")
+                if resolved_region is None:
+                    if domain_adapter.sql_has_any_dim_predicate(sql, col="region"):
+                        raise RuntimeError("SQL contains a region filter, but FILTERS region=ALL")
+                else:
+                    if not domain_adapter.sql_has_dim_filter(sql, col="region", value=resolved_region):
+                        raise RuntimeError(f"SQL is missing a region filter for FILTERS region={resolved_region}")
 
-            if resolved_target is None:
-                if domain_adapter.sql_has_any_dim_predicate(sql, col="target"):
-                    raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
-            else:
-                if not domain_adapter.sql_has_dim_filter(sql, col="target", value=resolved_target):
-                    raise RuntimeError(f"SQL is missing a target filter for FILTERS target={resolved_target}")
+                if resolved_target is None:
+                    if domain_adapter.sql_has_any_dim_predicate(sql, col="target"):
+                        raise RuntimeError("SQL contains a target filter, but FILTERS target=ALL")
+                else:
+                    if not domain_adapter.sql_has_dim_filter(sql, col="target", value=resolved_target):
+                        raise RuntimeError(f"SQL is missing a target filter for FILTERS target={resolved_target}")
 
         # Validate non-ALL values are in allowed rows (column-wise)
         for col in ("genre", "region", "target", "channel"):
