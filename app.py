@@ -642,24 +642,34 @@ def make_validate_filters(
                     "Expected predicate like LEFT(time_band_half_hour, 2) NOT IN ('00','01','02','03','04','05')."
                 )
 
-        def _require_last_n_weeks_week_id(sql: str, n: int):
+        def _require_last_n_weeks_week_id(sql: str, n: int, *, at_least: bool = False):
             s = (sql or "").lower()
             # Require both:
             # 1) a "latest N week_id" selector (CTE/subquery)
             # 2) usage of those week_ids to filter/join the main query
-            pat_latest = rf"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+{n}\b"
             pat_use = (
                 r"\bweek_id\b\s+in\s*\(\s*select\s+week_id\b"
                 r"|join[\s\S]*\bweek_id\b"
                 r"|where[\s\S]*\bweek_id\b\s*(=|in|between|>=|>)"
             )
-            ok = bool(re.search(pat_latest, s) and re.search(pat_use, s))
+
+            if at_least:
+                m = re.search(
+                    r"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+(\d+)\b",
+                    s,
+                )
+                limit_n = int(m.group(1)) if m else None
+                ok = bool(limit_n is not None and limit_n >= int(n) and re.search(pat_use, s))
+            else:
+                pat_latest = rf"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+{n}\b"
+                ok = bool(re.search(pat_latest, s) and re.search(pat_use, s))
+
             if not ok:
                 snippet = (sql or "").strip().replace("\n", " ")
                 snippet = (snippet[:800] + "...(truncated)") if len(snippet) > 800 else snippet
                 raise RuntimeError(
                     f"Missing 'latest {n} weeks' week_id filter. "
-                    f"Expected a DISTINCT week_id ORDER BY week_id DESC LIMIT {n} selector "
+                    f"Expected a DISTINCT week_id ORDER BY week_id DESC LIMIT {'>= ' + str(n) if at_least else str(n)} selector "
                     f"and usage of those week_ids to constrain the query (e.g., week_id IN (...)). "
                     f"SQL_snippet={snippet}"
                 )
@@ -722,6 +732,12 @@ def make_validate_filters(
             if re.search(r"\b(why|reason|increase|increased|decrease|decreased|change|changed|growth|grew|compare|compared|versus|vs|previous)\b", qtext_l):
                 n_weeks = 2
 
+        avg_prev_weeks = bool(
+            re.search(r"\baverage\b|\bavg\b", qtext_l)
+            and re.search(r"\bprevious\b", qtext_l)
+            and re.search(r"\bweeks?\b", qtext_l)
+        )
+
         # SQL must not include region/target filters if FILTERS says ALL
         for qb in sql_blocks or []:
             sql = qb.get("sql", "") or ""
@@ -739,7 +755,8 @@ def make_validate_filters(
                 # If user specified a time window, enforce something consistent.
                 if n_weeks is not None:
                     if touches_channel or touches_time_band or touches_program:
-                        _require_last_n_weeks_week_id(sql, n_weeks)
+                        # For "latest week vs average of previous weeks", any N>=2 is acceptable.
+                        _require_last_n_weeks_week_id(sql, n_weeks, at_least=avg_prev_weeks and n_weeks >= 2)
                 else:
                     # Unknown explicit window: require some filter on the correct date columns.
                     if touches_time_band:
