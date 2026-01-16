@@ -586,6 +586,19 @@ def make_validate_filters(
 
         def _require_dead_hours_exclusion(sql: str):
             s = (sql or "").lower()
+            # If the query already restricts time_band_half_hour to a non-dead-hour
+            # band (e.g., 9PM -> hour '21'), dead-hours exclusion is redundant.
+            # Accept common patterns that guarantee hour NOT IN ('00'..'05').
+            hour_safe = bool(
+                # LEFT(time_band_half_hour, 2) = '21' (or any 06-23)
+                re.search(r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s*=\s*'?(0[6-9]|1\d|2[0-3])'?", s)
+                # LEFT(time_band_half_hour, 2) IN ('21','22',...)
+                or re.search(r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s+in\s*\(\s*'?(0[6-9]|1\d|2[0-3])'?", s)
+                # time_band_half_hour LIKE '21%' (or 06-23)
+                or re.search(r"\btime_band_half_hour\b\s+like\s+'(0[6-9]|1\d|2[0-3])%", s)
+            )
+            if hour_safe:
+                return
             # Accept common forms.
             ok = bool(
                 re.search(r"left\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*2\s*\)\s*not\s+in\s*\(", s)
@@ -1435,6 +1448,10 @@ details[open] .markdown-body p { margin: 8px 0; line-height: 1.0; }
 pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 .error { color:darkred; font-weight:600; }
 
+.takeaways { margin: 6px 0 6px 1.2em; }
+.takeaways li { margin-bottom: 10px; line-height: 1.45; }
+.takeaways li p { margin: 0; display: inline; }
+
 .filter-row { display: flex; gap: 8px; align-items: baseline; }
 .filter-label { min-width: 140px; font-weight: 600; }
 .filter-value { font-family: Inter, system-ui, sans-serif; }
@@ -1502,7 +1519,7 @@ pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 
 <details open>
   <summary>Key Takeaways</summary>
-  <ul>{% for t in answer.takeaways %}<li>{{ t }}</li>{% endfor %}</ul>
+  <ul class="takeaways">{% for t in answer.takeaways %}<li>{{ t | markdown | safe }}</li>{% endfor %}</ul>
 </details>
 
 <details open>
