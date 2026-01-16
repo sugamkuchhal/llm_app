@@ -664,6 +664,12 @@ def make_validate_filters(
                 pat_latest = rf"select[\s\S]*distinct\s+week_id[\s\S]*order\s+by\s+week_id\s+desc[\s\S]*limit\s+{n}\b"
                 ok = bool(re.search(pat_latest, s) and re.search(pat_use, s))
 
+                # Allow a common "latest week" pattern using MAX(week_id) when n==1:
+                # WITH LatestWeek AS (SELECT MAX(week_id) AS week_id FROM <table>) ... week_id IN (SELECT week_id FROM LatestWeek)
+                if not ok and int(n) == 1:
+                    pat_max = r"select[\s\S]*max\s*\(\s*week_id\s*\)\s+as\s+week_id[\s\S]*from[\s\S]+"
+                    ok = bool(re.search(pat_max, s) and re.search(r"\bweek_id\b\s+in\s*\(\s*select\s+week_id\b[\s\S]*from\s+latestweek\b", s))
+
             if not ok:
                 snippet = (sql or "").strip().replace("\n", " ")
                 snippet = (snippet[:800] + "...(truncated)") if len(snippet) > 800 else snippet
