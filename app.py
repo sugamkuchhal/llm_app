@@ -572,6 +572,36 @@ def make_validate_filters(
             sl, css = _source_label(source_key)
             return {"label": label, "value": value, "source_label": sl, "badge_class": css}
 
+        def _detect_day_type_from_sql(sql_blocks: list[dict]) -> str | None:
+            """
+            Detect weekday/weekend constraint from SQL (best-effort).
+            Supports common BigQuery patterns using EXTRACT(DAYOFWEEK...).
+            """
+            for qb in sql_blocks or []:
+                s = (qb.get("sql", "") or "").lower()
+                # Weekdays: DAYOFWEEK 2..6 (Mon..Fri) in BigQuery.
+                if re.search(r"extract\s*\(\s*dayofweek\s+from\s+[\w\.\(\)]+\s*\)\s+between\s+2\s+and\s+6", s):
+                    return "Weekdays"
+                if re.search(r"extract\s*\(\s*dayofweek\s+from\s+[\w\.\(\)]+\s*\)\s+in\s*\(\s*2\s*,\s*3\s*,\s*4\s*,\s*5\s*,\s*6\s*\)", s):
+                    return "Weekdays"
+                # Weekends: DAYOFWEEK IN (1,7) (Sun/Sat) or NOT BETWEEN 2 AND 6
+                if re.search(r"extract\s*\(\s*dayofweek\s+from\s+[\w\.\(\)]+\s*\)\s+in\s*\(\s*1\s*,\s*7\s*\)", s):
+                    return "Weekends"
+                if re.search(r"extract\s*\(\s*dayofweek\s+from\s+[\w\.\(\)]+\s*\)\s+not\s+between\s+2\s+and\s+6", s):
+                    return "Weekends"
+            return None
+
+        day_type = _detect_day_type_from_sql(sql_blocks)
+        dt_source = "user" if re.search(r"\bweekday|weekdays|weekend|weekends\b", qtext.lower()) else "inferred"
+        should_add_day_type = False
+        if day_type:
+            existing = {
+                (d.get("label") or "").strip().lower()
+                for d in (parsed_filters.get("filters_display") or [])
+                if isinstance(d, dict)
+            }
+            should_add_day_type = "day type" not in existing
+
         parsed_filters["filters_display"] = [
             _row("Genre", genre_val or "(no filter)", genre_display_source),
             _row("Region", region_val or "(no filter)", region_display_source),
@@ -579,6 +609,8 @@ def make_validate_filters(
             _row("Channel", channel_val or "(no filter)", channel_display_source),
             _row("Time Window", _format_time_window(time_window_val), time_window_display_source),
         ]
+        if day_type and should_add_day_type:
+            parsed_filters["filters_display"].append(_row("Day Type", day_type, dt_source))
         if touches_dead_hours_tables:
             parsed_filters["filters_display"].append(
                 _row("Dead Hours", _format_dead_hours(include_dead_hours), dead_hours_display_source)
@@ -1435,6 +1467,10 @@ details[open] .markdown-body p { margin: 8px 0; line-height: 1.0; }
 pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 .error { color:darkred; font-weight:600; }
 
+.takeaways { margin: 6px 0 6px 1.2em; }
+.takeaways li { margin-bottom: 10px; line-height: 1.45; }
+.takeaways li p { margin: 0; display: inline; }
+
 .filter-row { display: flex; gap: 8px; align-items: baseline; }
 .filter-label { min-width: 140px; font-weight: 600; }
 .filter-value { font-family: Inter, system-ui, sans-serif; }
@@ -1502,7 +1538,7 @@ pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
 
 <details open>
   <summary>Key Takeaways</summary>
-  <ul>{% for t in answer.takeaways %}<li>{{ t }}</li>{% endfor %}</ul>
+  <ul class="takeaways">{% for t in answer.takeaways %}<li>{{ t | markdown | safe }}</li>{% endfor %}</ul>
 </details>
 
 <details open>
