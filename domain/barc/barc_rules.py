@@ -34,13 +34,54 @@ def normalize_no_filter_to_none(v: Any) -> str | None:
 
 def _question_mentions_time_window(question: str | None) -> bool:
     q = (question or "").lower()
+    # Support digit and word numbers (e.g., "latest two weeks").
+    word_num = r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)"
     return bool(
-        re.search(r"\b(last|latest|past)\s+\d+\s+(day|days|week|weeks)\b", q)
+        re.search(rf"\b(last|latest|past)\s+(?:\d+|{word_num})\s+(day|days|week|weeks)\b", q)
         or re.search(r"\b(\d{4}-\d{2}-\d{2})\b", q)
         or re.search(r"\bbetween\b.*\band\b", q)
         or re.search(r"\bfrom\b.*\bto\b", q)
         or re.search(r"\bweek_id\b|\bweek\s+\d+\b", q)
     )
+
+
+def infer_requested_weeks(question: str | None) -> int | None:
+    """
+    Best-effort extraction of a requested week window from user text.
+    Supports digit and common word numbers (two/three/...).
+    """
+    q = (question or "").lower()
+    m = re.search(r"\b(last|latest|past)\s+(\d+)\s+weeks?\b", q)
+    if m:
+        try:
+            return int(m.group(2))
+        except ValueError:
+            return None
+
+    word_map = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "couple": 2,
+    }
+    m2 = re.search(r"\b(last|latest|past)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\s+weeks?\b", q)
+    if m2:
+        return word_map.get(m2.group(2))
+
+    # Handle "last week"/"latest week" as 1 week.
+    if re.search(r"\b(last|latest|past)\s+week\b", q):
+        return 1
+
+    return None
 
 
 def infer_include_dead_hours(question: str | None) -> bool:

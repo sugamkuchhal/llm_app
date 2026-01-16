@@ -28,6 +28,7 @@ from domain.barc.barc_rules import (
     choose_default_with_constraints,
     sql_has_any_dim_predicate,
     sql_has_dim_filter,
+    infer_requested_weeks,
 )
 
 

@@ -362,13 +362,12 @@ def make_validate_filters(
         qtext_l = qtext.lower()
 
         def _user_specified_time_window(text: str) -> bool:
-            t = (text or "").lower()
-            return bool(
-                re.search(r"\b(last|latest|past)\s+\d+\s+(day|days|week|weeks)\b", t)
-                or re.search(r"\b(\d{4}-\d{2}-\d{2})\b", t)
-                or re.search(r"\bbetween\b.*\band\b", t)
-                or re.search(r"\bfrom\b.*\bto\b", t)
-                or re.search(r"\bweek_id\b|\bweek\s+\d+\b", t)
+            # Delegate to domain rules (supports word numbers like "two weeks").
+            return domain_adapter.infer_requested_weeks(text) is not None or bool(
+                re.search(r"\b(\d{4}-\d{2}-\d{2})\b", (text or "").lower())
+                or re.search(r"\bbetween\b.*\band\b", (text or "").lower())
+                or re.search(r"\bfrom\b.*\bto\b", (text or "").lower())
+                or re.search(r"\bweek_id\b|\bweek\s+\d+\b", (text or "").lower())
             )
 
         user_specified_time = _user_specified_time_window(qtext_l)
@@ -667,6 +666,9 @@ def make_validate_filters(
         tw = (time_window or "").lower()
         m_weeks = re.search(r"\b(\d+)\s*week", tw)
         n_weeks = int(m_weeks.group(1)) if m_weeks else None
+        if n_weeks is None and user_specified_time:
+            # If planner time_window didn't contain a number, fall back to user text.
+            n_weeks = domain_adapter.infer_requested_weeks(question)
 
         # SQL must not include region/target filters if FILTERS says ALL
         for qb in sql_blocks or []:
