@@ -172,6 +172,18 @@ use the same methodology to find 'Cume Reach %age', by using channel_Week_Reach_
 Unless explicitly stated in the question, we should by default remove the dead hours from all calculations. The way to identify dead hours in time_band_table and program_table is 
 left(time_band_half_hour,2) in ('00','01','02','03','04','05')
 
+10. time_band_half_hour FORMAT + "X PM band" FILTERING (CRITICAL)
+The column time_band_half_hour is a STRING in the format:
+- HH:MM-HH:MM (24-hour clock), e.g. '21:00-21:30', '21:30-22:00'
+
+Rules:
+- NEVER filter time_band_half_hour using 'HH:MM:SS' (e.g. '21:00:00') or a single time value.
+- If the user asks for a specific hour band like "9PM band", you MUST translate it into the two 30-minute slots:
+  - 9PM band => time_band_half_hour IN ('21:00-21:30','21:30-22:00')
+  - 8PM band => time_band_half_hour IN ('20:00-20:30','20:30-21:00')
+  - 10PM band => time_band_half_hour IN ('22:00-22:30','22:30-23:00')
+- If the user asks for a range (e.g., "9PM to 10PM"), you MUST include all slots that fall within the range using the same HH:MM-HH:MM format.
+
 ----------------------------
 
 SQL PLANNING NOTE:
