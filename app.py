@@ -682,6 +682,13 @@ def make_validate_filters(
         if n_weeks is None and user_specified_time:
             # If planner time_window didn't contain a number, fall back to user text.
             n_weeks = domain_adapter.infer_requested_weeks(question)
+        if user_specified_time and n_weeks == 1:
+            # Many "latest week" questions are implicitly week-over-week comparisons
+            # (e.g., "why did X increase in market share in the latest week?").
+            # In those cases, the SQL reasonably needs both latest and previous week,
+            # so enforce 2 weeks instead of rejecting LIMIT 2 patterns.
+            if re.search(r"\b(why|reason|increase|increased|decrease|decreased|change|changed|growth|grew|compare|compared|versus|vs|previous)\b", qtext_l):
+                n_weeks = 2
 
         # SQL must not include region/target filters if FILTERS says ALL
         for qb in sql_blocks or []:
