@@ -586,19 +586,34 @@ def make_validate_filters(
 
         def _require_dead_hours_exclusion(sql: str):
             s = (sql or "").lower()
-            # If the query already restricts time_band_half_hour to a non-dead-hour
-            # band (e.g., 9PM -> hour '21'), dead-hours exclusion is redundant.
-            # Accept common patterns that guarantee hour NOT IN ('00'..'05').
-            hour_safe = bool(
-                # LEFT(time_band_half_hour, 2) = '21' (or any 06-23)
-                re.search(r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s*=\s*'?(0[6-9]|1\d|2[0-3])'?", s)
-                # LEFT(time_band_half_hour, 2) IN ('21','22',...)
-                or re.search(r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s+in\s*\(\s*'?(0[6-9]|1\d|2[0-3])'?", s)
-                # time_band_half_hour LIKE '21%' (or 06-23)
-                or re.search(r"\btime_band_half_hour\b\s+like\s+'(0[6-9]|1\d|2[0-3])%", s)
+            # If the query already restricts the time band to hours outside dead hours
+            # (00-05), then the explicit dead-hours exclusion is redundant.
+            #
+            # Examples that make dead-hours impossible:
+            # - LEFT(time_band_half_hour, 2) = '21'   (9PM band)
+            # - time_band_half_hour LIKE '21%'
+            # - LEFT(time_band_half_hour, 2) BETWEEN '06' AND '23'
+            safe_hour_constraint = bool(
+                re.search(
+                    r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s*=\s*'?(0[6-9]|1\d|2[0-3])'?",
+                    s,
+                )
+                or re.search(
+                    r"\btime_band_half_hour\b\s+like\s+'(0[6-9]|1\d|2[0-3])%",
+                    s,
+                )
+                or re.search(
+                    r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s+between\s+'?0[6-9]'?\s+and\s+'?2[0-3]'?",
+                    s,
+                )
+                or re.search(
+                    r"(left|substr)\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*(2|1\s*,\s*2)\s*\)\s+between\s+'?1\d'?\s+and\s+'?2[0-3]'?",
+                    s,
+                )
             )
-            if hour_safe:
+            if safe_hour_constraint:
                 return
+
             # Accept common forms.
             ok = bool(
                 re.search(r"left\s*\(\s*[\w\.]*time_band_half_hour\s*,\s*2\s*\)\s*not\s+in\s*\(", s)
@@ -1530,7 +1545,7 @@ pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
   <ul class="takeaways">{% for t in answer.takeaways %}<li>{{ t | markdown | safe }}</li>{% endfor %}</ul>
 </details>
 
-<details open>
+<details>
   <summary>Details</summary>
   <div class="markdown-body details-body">
     {{ answer.details | markdown | safe }}
@@ -1586,7 +1601,7 @@ let countdownInterval;
 function handleSubmit(e) {
   e.preventDefault(); // ⬅️ REQUIRED
 
-  let seconds = 99;
+  let seconds = 199;
 
   document.getElementById("results").innerHTML = `
     <p><em>Running analysis…</em></p>
