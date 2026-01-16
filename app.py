@@ -1513,7 +1513,7 @@ pre { background:#f8f8f8; padding:12px; white-space:pre-wrap; }
   <ul>{% for t in answer.takeaways %}<li>{{ t }}</li>{% endfor %}</ul>
 </details>
 
-<details open>
+<details>
   <summary>Details</summary>
   <div class="markdown-body details-body">
     {{ answer.details | markdown | safe }}
