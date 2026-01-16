@@ -611,6 +611,23 @@ def make_validate_filters(
                     s,
                 )
             )
+
+            # Also accept explicit band lists like:
+            # time_band_half_hour IN ('21:00-21:30','21:30-22:00')
+            # If all specified band start-hours are outside 00-05, dead-hours exclusion is redundant.
+            band_groups = re.findall(
+                r"[\w\.]*time_band_half_hour\b\s+in\s*\(([^)]*)\)",
+                s,
+                flags=re.DOTALL,
+            )
+            if band_groups:
+                start_hours: list[str] = []
+                for grp in band_groups:
+                    # Match HH:MM-HH:MM with optional spaces around '-'
+                    for hh in re.findall(r"'(\d{2}):\d{2}\s*-\s*\d{2}:\d{2}'", grp):
+                        start_hours.append(hh)
+                if start_hours and all(hh not in {"00", "01", "02", "03", "04", "05"} for hh in start_hours):
+                    safe_hour_constraint = True
             if safe_hour_constraint:
                 return
 
