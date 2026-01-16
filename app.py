@@ -723,6 +723,10 @@ def make_validate_filters(
                     f"Missing date filter on {date_col} for an explicit user time window request."
                 )
 
+        # Toggle for SQL time-window enforcement. Default: disabled (prevents false negatives
+        # when the planner uses alternative but valid time-window patterns).
+        enforce_time_window_sql = os.getenv("ENFORCE_TIME_WINDOW_SQL", "0").strip().lower() in {"1", "true", "yes"}
+
         # Parse time_window value best-effort for enforcement.
         tw = (time_window or "").lower()
         m_weeks = re.search(r"\b(\d+)\s*week", tw)
@@ -752,27 +756,28 @@ def make_validate_filters(
             touches_time_band = _sql_touches(sql, "time_band_table")
             touches_program = _sql_touches(sql, "program_table")
 
-            # Enforce last 4 weeks by default when user didn't specify.
-            if not user_specified_time:
-                # Consistent policy: use week_id latest 4 across all BARC tables.
-                if touches_channel or touches_time_band or touches_program:
-                    _require_last_n_weeks_week_id(sql, 4)
-            else:
-                # If user specified a time window, enforce something consistent.
-                if n_weeks is not None:
+            if enforce_time_window_sql:
+                # Enforce last 4 weeks by default when user didn't specify.
+                if not user_specified_time:
+                    # Consistent policy: use week_id latest 4 across all BARC tables.
                     if touches_channel or touches_time_band or touches_program:
-                        # For "latest week vs average of previous weeks", any N>=2 is acceptable.
-                        _require_last_n_weeks_week_id(sql, n_weeks, at_least=avg_prev_weeks and n_weeks >= 2)
+                        _require_last_n_weeks_week_id(sql, 4)
                 else:
-                    # Unknown explicit window: require some filter on the correct date columns.
-                    if touches_time_band:
-                        _require_some_date_filter(sql, "time_band_date")
-                    if touches_program:
-                        _require_some_date_filter(sql, "program_date")
-                    if touches_channel:
-                        # Require any mention of week_id with a limiting pattern.
-                        if "week_id" not in sql.lower():
-                            raise RuntimeError("Missing week_id-based time filter for channel_table with explicit time request")
+                    # If user specified a time window, enforce something consistent.
+                    if n_weeks is not None:
+                        if touches_channel or touches_time_band or touches_program:
+                            # For "latest week vs average of previous weeks", any N>=2 is acceptable.
+                            _require_last_n_weeks_week_id(sql, n_weeks, at_least=avg_prev_weeks and n_weeks >= 2)
+                    else:
+                        # Unknown explicit window: require some filter on the correct date columns.
+                        if touches_time_band:
+                            _require_some_date_filter(sql, "time_band_date")
+                        if touches_program:
+                            _require_some_date_filter(sql, "program_date")
+                        if touches_channel:
+                            # Require any mention of week_id with a limiting pattern.
+                            if "week_id" not in sql.lower():
+                                raise RuntimeError("Missing week_id-based time filter for channel_table with explicit time request")
 
             # Dead hours exclusion for time_band/program unless explicitly included
             if (touches_time_band or touches_program) and not include_dead_hours:
